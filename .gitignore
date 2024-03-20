@@ -6,6 +6,9 @@ output/
 workspace/
 run*.sh
 .DS_Store
+local/
+output/
+datasets/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -17,13 +17,16 @@ from torch import nn
 from ..utils.clicker import Clicker
 from ..utils.predictor import Predictor
 from PIL import Image
-from inference_core import InferenceCore
 from metrics.j_and_f_scores import batched_jaccard,batched_f_measure
 
+# XMem
+from inference.inference_core import InferenceCore
+from inference.data.mask_mapper import MaskMapper
+
 def evaluate(
-    model, propagation_model, fusion_model,
+    model, xmem_model,
     data_loader, iou_threshold = 0.85, max_interactions = 10, sampling_strategy=1,
-    eval_strategy = "worst", seed_id = 0, vis_path = None, max_rounds=0
+    eval_strategy = "worst", seed_id = 0, vis_path = None, max_rounds=0, xmem_config=None
 ):
     """
     Run model on the data_loader and return a dict, later used to calculate all the metrics for multi-instance inteactive segmentation such as NCI,
@@ -72,8 +75,8 @@ def evaluate(
     all_contour = {}
     all_ious = {}
     all_instance_level_iou = {}
-    copy_iou_checkpoints = [0.85, 0.90, 0.95, 0.99]
-    
+    copy_iou_checkpoints = [0.85, 0.90, 0.95, 0.99]    
+
     with ExitStack() as stack:                                           
 
         if isinstance(model, nn.Module):    
@@ -88,10 +91,12 @@ def evaluate(
         dataloader_dict = defaultdict(list)
         print(f'[EVALUATOR INFO] Iterating through the Data Loader...')
         # iterate through the data_loader, one image at a time
-        for idx, inputs in enumerate(data_loader):          
+        for idx, inputs in enumerate(data_loader):                     
             curr_seq_name = inputs[0]["file_name"].split('/')[-2]
-            dataloader_dict[curr_seq_name].append([idx, inputs])
+            dataloader_dict[curr_seq_name].append([idx, inputs])            
 
+
+        #### SEQUENCE-LEVEL LOOP ####
         print(f'[EVALUATOR INFO] Sequence-wise evaluation...')
         for seq in list(dataloader_dict.keys()):
             print(f'\n[SEQUENCE INFO] Sequence: {seq}')
@@ -102,25 +107,36 @@ def evaluate(
             all_frames = all_images[seq]                                # collect all image frames in the sequence
             num_frames = len(all_frames)                                # sequence length
             all_frames = all_frames.unsqueeze(0).float()                
-            processor = InferenceCore(propagation_model, fusion_model, all_frames, seq_num_instances)       # initialize prop module
             
-            lowest_frame_index = 0                                      # frame with lowest IoU after propagation - initially, first frame
-            round_num = 0                                               # counter for number of propagation rounds
-            clicker_dict = {}                                           # records clickers for interacted frames
-            predictor_dict = {}                                         # records predictors for interacted frames
+            # XMem constructs
+            xmem_config['enable_long_term_count_usage'] = (
+                xmem_config['enable_long_term'] and
+                (num_frames
+                    / (xmem_config['max_mid_term_frames']-xmem_config['min_mid_term_frames'])
+                    * xmem_config['num_prototypes'])
+                >= xmem_config['max_long_term_elements']
+            )
+            mapper = MaskMapper()            
+            processor=InferenceCore(xmem_model, config=xmem_config)
 
-            num_interactions_for_sequence = [0]*num_frames              # records #interactions on each frame of the sequence
+            # counters and trackers
+            lowest_frame_index = 0                                                   # frame with lowest IoU after propagation - initially, first frame
+            round_num = 0                                                            # counter for number of propagation rounds
+            clicker_dict = {}                                                        # records clickers for interacted frames
+            predictor_dict = {}                                                      # records predictors for interacted frames
+
+            num_interactions_for_sequence = [0]*num_frames                           # records #interactions on each frame of the sequence
             num_interactions_per_instance_for_sequence = [[]] * num_frames           # records #interactions on each object of each frame of the sequence
-            out_masks = None                                            # stores predicted masks by prop module, initially None
-            all_interactions_per_round[seq] = []                           # records round-wise interaction details
-            all_j_and_f[seq] = [0]                                      # records J&F metric score for the sequence
-            seq_avg_iou = 0                                                 # records average IoU for the sequence
-            seq_avg_jf = 0                                                  # records average J&F for the sequence
-            iou_checkpoints = copy.deepcopy(copy_iou_checkpoints)            # IoU checkpoints
+            out_masks = None                                                         # stores predicted masks by prop module, initially None
+            all_interactions_per_round[seq] = []                                     # records round-wise interaction details
+            all_j_and_f[seq] = [0]                                                   # records J&F metric score for the sequence
+            seq_avg_iou = 0                                                          # records average IoU for the sequence
+            seq_avg_jf = 0                                                           # records average J&F for the sequence
+            iou_checkpoints = copy.deepcopy(copy_iou_checkpoints)                    # IoU checkpoints
             
             instance_level_iou = [[]] * num_frames
             
-            # start
+            #### ROUND LOOP ####
             while lowest_frame_index!=-1:
                 round_num += 1      # round start
                 loop = 0
@@ -137,6 +153,7 @@ def evaluate(
                     clicker = clicker_dict[lowest_frame_index]
                     predictor = predictor_dict[lowest_frame_index]
                     repeat = True
+                
                 
                 #check for missing objects
                 object_ids = set(np.unique(all_gt_masks[seq][lowest_frame_index]))                  # objects present in the frame                
@@ -184,11 +201,10 @@ def evaluate(
                 
                 # interaction limit
                 max_iters_for_image = max_interactions * num_instances                                      
-
                 point_sampled = True
                 random_indexes = list(range(len(ious)))
 
-                #interative refinement loop                 
+                #### INTERACTIVE REFINEMENT LOOP ####        
                 while (num_interactions_for_sequence[lowest_frame_index]<max_iters_for_image):               # 1st stopping criterion - if interaction budget is over
                     
                     while all(iou >= iou_checkpoints[0] for iou in ious):                                    # IoU checkpoints
@@ -198,9 +214,8 @@ def evaluate(
                     if all(iou >= iou_threshold for iou in ious):                                             # 2nd stopping criterion - if IoU threshold is reached
                         print(f'[DynaMITe INFO][SEQ:{seq}][ROUND:{round_num}] Frame {lowest_frame_index} meets IoU Threshold {iou_threshold} after {num_interactions_for_sequence[lowest_frame_index]} interactions!')
                         break
-                    
-                    loop += 1
-                    #print(f'[DynaMITe INFO] Round {round_num}, Loop {loop}')                    
+
+                    loop += 1             
                     
                     # According to eval strategy, select which instance to interact with
                     if eval_strategy == "worst":
@@ -227,7 +242,6 @@ def evaluate(
                         pred_masks = predictor.get_prediction(clicker)
                         clicker.set_pred_masks(pred_masks)
                         ious = clicker.compute_iou()
-                        #print(f'[DynaMITe REFINEMENT][SEQ:{seq}][ROUND:{round_num}][LOOP: {loop}] Frame {lowest_frame_index} Instance IoUs: {ious}')
                         if vis_path:
                             clicker.save_visualization(vis_path, ious=ious, num_interactions=num_interactions_for_sequence[lowest_frame_index], round_num=round_num)
                         
@@ -237,8 +251,8 @@ def evaluate(
                     
                 # store clicker and predictor, in case this frame needs to be interacted with again
                 clicker_dict[lowest_frame_index] = clicker
-                predictor_dict[lowest_frame_index] = predictor
-
+                predictor_dict[lowest_frame_index] = predictor                
+                
                 # account for missing objects
                 if pred_masks.shape[0] != seq_num_instances:
                     dummy = np.zeros((seq_num_instances, pred_masks.shape[1], pred_masks.shape[2]))
@@ -249,18 +263,41 @@ def evaluate(
                         dummy[i][np.where(pred_masks[j]==1)] = 1
                         j +=1
                     pred_masks = torch.from_numpy(dummy)
-
-                # compute background mask                                                                                   # MiVOS propagation expects (num_instances+1, 1, H, W)
-                bg_mask = np.ones(pred_masks.shape[-2:])                
-                for i in range(seq_num_instances):
-                    bg_mask[np.where(pred_masks[i]==1.)]=0   
-                bg_mask = torch.from_numpy(bg_mask).unsqueeze(0)                                                            # H,W -> 1,H,W
-                pred_masks = torch.cat((bg_mask,pred_masks),dim=0)                                                          # [bg, inst1, inst2, ..]
-                pred_masks = pred_masks.unsqueeze(1).float()                                                                # num_inst+1, H, W -> num_inst+1,1, H, W
                 
-                # Propagate
-                print(f'[PROPAGATION INFO][SEQ:{seq}][ROUND:{round_num}] Temporal propagation in progress...')
-                out_masks = processor.interact(pred_masks,lowest_frame_index)                
+                #### XMEM ####
+                # pred mask -> single channel mask
+                pred_masks = pred_masks.to('cpu').numpy()
+                print(f'[INFO] pred_masks.shape: {type(pred_masks)}, {pred_masks.shape}')
+                msk = np.zeros((pred_masks.shape[1],pred_masks.shape[2]))
+                for i in range(seq_num_instances):
+                    msk += pred_masks[i]*(i+1)
+                msk = torch.from_numpy(msk).unsqueeze(0)
+
+                msk, labels = mapper.convert_mask(msk[0].numpy())
+                msk = msk.to('cuda')
+                processor.set_all_labels(list(mapper.remappings.values()))
+
+                out_masks = []
+                seq_length = len(dataloader_dict[seq])
+                for i in range(seq_length):
+                    idx, inputs = dataloader_dict[seq][i]
+                    msk_ = None
+                    labels_ = None
+                    if i == lowest_frame_index:
+                        msk_ = msk
+                        labels_=labels
+                    
+                    rgb = all_images[seq][i].to('cuda')
+                    prob = processor.step(rgb, msk_, labels_, end=(i==seq_length))
+                    
+                    # prob.shape: #inst+1, H, W --> (H, W) (and numpy)
+                    prob = prob.to('cpu').numpy()
+                    dummy = np.zeros((prob.shape[1],prob.shape[2]))
+                    for i in range(prob.shape[0]):
+                        dummy += prob[i]* i             # first channel of prob is bg
+                    out_masks.append(dummy)
+
+                out_masks =  np.round_(np.stack(out_masks))
 
                 # metrics (mean: over instances in a frame)
                 jaccard_mean, jaccard_instances = batched_jaccard(all_gt_masks[seq], out_masks, average_over_objects=True, nb_objects=seq_num_instances)
@@ -280,8 +317,8 @@ def evaluate(
                 iou_copy = copy.deepcopy(iou_for_sequence)
                 while True:
                     min_iou = min(iou_copy)
-                    if min_iou < iou_threshold:         # 1. whether all frames meet IoU threshold
-                        if round_num == max_rounds:     # 2. whether round budget is over
+                    if min_iou < iou_threshold:                                                         # 1. whether all frames meet IoU threshold
+                        if round_num == max_rounds:                                                     # 2. whether round budget is over
                             print(f'[STOPPING CRITERIA][SEQ:{seq}][ROUND:{round_num}] Maximum round limit ({max_rounds}) reached!')
                             print(f'[STOPPING CRITERIA][SEQ:{seq}][ROUND:{round_num}] IoU scores: Max:{max(iou_for_sequence)}, Min: {min_iou}, Avg: {seq_avg_iou} ')
                             lowest_frame_index = -1

@@ -9,6 +9,8 @@ run*.sh
 local/
 output/
 datasets/
+!dynamite/data/datasets/
+davis2017-evaluation/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

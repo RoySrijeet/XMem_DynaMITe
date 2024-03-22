@@ -165,12 +165,13 @@ for vid_reader in progressbar(meta_loader, max_value=len(meta_dataset), redirect
 
     for ti, data in enumerate(loader):
         with torch.cuda.amp.autocast(enabled=not args.benchmark):
-            rgb = data['rgb'].cuda()[0]
-            msk = data.get('mask')
-            info = data['info']
-            frame = info['frame'][0]
-            shape = info['shape']
-            need_resize = info['need_resize'][0]
+            rgb = data['rgb'].cuda()[0]             # torch.Tensor (3,H,W)            
+            msk = data.get('mask')                  # torch.Tensor (1,H,W) for first frame of a sequence, else None
+            info = data['info']                     # dict - keys: frame, save, shape, need_resize
+            frame = info['frame'][0]                # string - filename (e.g., 00001.jpg)
+            #print(f'save: {info["save"]}')         # torch.tensor([bool]) (set to True)
+            shape = info['shape']                   # list  - [tensor(H), tensor(W)]
+            need_resize = info['need_resize'][0]    # torch.Tensor([bool]) (set to True)            
 
             """
             For timing see https://discuss.pytorch.org/t/how-to-measure-time-in-pytorch/26964
@@ -198,16 +199,15 @@ for vid_reader in progressbar(meta_loader, max_value=len(meta_dataset), redirect
                 msk = torch.Tensor(msk).cuda()
                 if need_resize:
                     msk = vid_reader.resize_mask(msk.unsqueeze(0))[0]
-                processor.set_all_labels(list(mapper.remappings.values()))
+                processor.set_all_labels(list(mapper.remappings.values()))          # num_inst, H, W
             else:
                 labels = None
 
             # Run the model on this frame
-            prob = processor.step(rgb, msk, labels, end=(ti==vid_length-1))
-
+            prob = processor.step(rgb, msk, labels, end=(ti==vid_length-1))         # num_inst+1, H, W            
             # Upsample to original size if needed
             if need_resize:
-                prob = F.interpolate(prob.unsqueeze(1), shape, mode='bilinear', align_corners=False)[:,0]
+                prob = F.interpolate(prob.unsqueeze(1), shape, mode='bilinear', align_corners=False)[:,0]  # num_inst+1, H, W
 
             end.record()
             torch.cuda.synchronize()

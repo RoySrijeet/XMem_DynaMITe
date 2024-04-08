@@ -117,10 +117,7 @@ class Trainer(DefaultTrainer):
                 print(f'[INFO] Initiating Multi-Instance Evaluation on {eval_datasets}...')
                 
                 if eval_strategy in ["random", "best", "worst"]:
-                    if first_frame_only:
-                        from dynamite.inference.multi_instance.random_best_worst_ff import evaluate
-                    else:
-                        from dynamite.inference.multi_instance.random_best_worst import evaluate
+                    from dynamite.inference.multi_instance.random_best_worst import evaluate
                 elif eval_strategy == "max_dt":
                     from dynamite.inference.multi_instance.max_dt import evaluate
                 elif eval_strategy == "wlb":
@@ -154,7 +151,7 @@ class Trainer(DefaultTrainer):
                     vis_path_vis = os.path.join(vis_path, 'vis')
                     os.makedirs(vis_path_vis, exist_ok=True)
                     results_i = evaluate(dynamite_model, xmem_model, 
-                                        data_loader_dict, all_images, all_gt_masks,
+                                        dataloader_dict, all_images, all_gt_masks,
                                         iou_threshold = iou,
                                         max_interactions = interactions,
                                         eval_strategy = eval_strategy,

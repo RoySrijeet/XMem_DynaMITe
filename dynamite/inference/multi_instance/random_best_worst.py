@@ -25,30 +25,12 @@ from inference.data.mask_mapper import MaskMapper
 
 def evaluate(
     model, xmem_model,
-    data_loader, iou_threshold = 0.85, max_interactions = 10, sampling_strategy=1,
-    eval_strategy = "worst", seed_id = 0, vis_path = None, max_rounds=0, xmem_config=None
+    dataloader_dict, all_images, all_gt_masks,
+    iou_threshold = 0.85, max_interactions = 10, sampling_strategy=1,
+    eval_strategy = "worst", seed_id = 0, vis_path = None, max_rounds=0, xmem_config=None,
+    dataset_name="davis_2017_val", save_masks=False    
 ):
-    """
-    Run model on the data_loader and return a dict, later used to calculate all the metrics for multi-instance inteactive segmentation such as NCI,
-    NFO, NFI, and Avg IoU. The model will be used in eval mode.
 
-    Arguments:
-        model (callable): a callable which takes an object from `data_loader` and returns some outputs.
-            If it's an nn.Module, it will be temporarily set to `eval` mode.
-            If you wish to evaluate a model in `training` mode instead, you can wrap the given model and override its behavior of `.eval()` and `.train()`.
-        data_loader: an iterable object with a length. The elements it generates will be the inputs to the model.
-        iou_threshold: float - Desired IoU value for each object mask
-        max_interactions: int - Maxinum number of interactions per object
-        sampling_strategy: int - Strategy to avaoid regions while sampling next clicks
-            0: new click sampling avoids all the previously sampled click locations
-            1: new click sampling avoids all locations upto radius 5 around all the previously sampled click locations
-        eval_strategy: str - Click sampling strategy during refinement (random, best, worst)
-        seed_id: int - Used to generate fixed seed during evaluation
-        vis_path: str - Path to save visualization of masks with clicks during evaluation
-
-    Returns:
-        Dict
-    """
     # args
     print(f'[EVALUATOR INFO] IoU Threshold: {iou_threshold}')
     print(f'[EVALUATOR INFO] Max Interactions per Frame: {max_interactions}')
@@ -58,13 +40,8 @@ def evaluate(
 
     num_devices = get_world_size()
     logger = logging.getLogger(__name__)
-    logger.info("Start inference on {} batches".format(len(data_loader)))                       # 1999 (davis_2017_val)
-    logger.info(f"Using {eval_strategy} evaluation strategy with random seed {seed_id}")
-    
-    print(f'[EVALUATOR INFO] Loading all frames from the disc...')
-    all_images = load_images()
-    print(f'[EVALUATOR INFO] Loading all ground truth masks from the disc...')
-    all_gt_masks = load_gt_masks()
+    logger.info("Start inference on {} batches".format(len(dataloader_dict)))                       # 1999 (davis_2017_val)
+    logger.info(f"Using {eval_strategy} evaluation strategy with random seed {seed_id}")    
     
     all_interactions = {}
     all_interactions_per_round = {}
@@ -87,19 +64,13 @@ def evaluate(
         total_num_rounds = 0                                             # for whole dataset
 
         random.seed(123456+seed_id)
-        
-        dataloader_dict = defaultdict(list)
-        print(f'[EVALUATOR INFO] Iterating through the Data Loader...')
-        # iterate through the data_loader, one image at a time
-        for idx, inputs in enumerate(data_loader):                     
-            curr_seq_name = inputs[0]["file_name"].split('/')[-2]
-            dataloader_dict[curr_seq_name].append([idx, inputs])            
-
-
+    
         #### SEQUENCE-LEVEL LOOP ####
         print(f'[EVALUATOR INFO] Sequence-wise evaluation...')
         for seq in list(dataloader_dict.keys()):
             print(f'\n[SEQUENCE INFO] Sequence: {seq}')
+            if vis_path:
+                vis_path_seq = os.path.join(vis_path, seq)
             
             # Initialize propagation module - once per-sequence
             seq_object_ids = set(np.unique(all_gt_masks[seq][0]))       # object ids in the sequence
@@ -140,6 +111,8 @@ def evaluate(
             while lowest_frame_index!=-1:
                 round_num += 1      # round start
                 loop = 0
+                if vis_path:
+                    vis_path_round = os.path.join(vis_path_seq, str(round_num))
 
                 print(f'[DynaMITe INFO][SEQ:{seq}][ROUND:{round_num}] DynaMITe refining frame {lowest_frame_index}...')
                 idx, inputs = dataloader_dict[seq][lowest_frame_index]                              # load frame with lowest IoU
@@ -182,7 +155,7 @@ def evaluate(
                 instance_level_iou[lowest_frame_index] = [iou.tolist() for iou in ious]
                 frame_avg_iou = sum(ious)/len(ious)                                                        
                 if vis_path:
-                    clicker.save_visualization(vis_path, ious=ious, num_interactions=num_interactions_for_sequence[lowest_frame_index], round_num=round_num)             
+                    clicker.save_visualization(vis_path_round, ious=ious, num_interactions=num_interactions_for_sequence[lowest_frame_index], round_num=round_num, save_tensor=pred_masks, save_masks=save_masks)             
                 
                 
                 # record the interaction, if the frame has never been interacted with
@@ -191,7 +164,11 @@ def evaluate(
                     num_interactions_for_sequence[lowest_frame_index] += num_instances              
                     num_interactions_per_instance_for_sequence[lowest_frame_index] = [1]*(num_instances+1)      
                     num_interactions_per_instance_for_sequence[lowest_frame_index][-1] = 0                        # no interaction for bg yet, so reset                    
-                    
+                    # no interaction for missing objects, so reset
+                    if missing_obj_ids:
+                        for i in missing_obj_ids:
+                            num_interactions_per_instance_for_sequence[lowest_frame_index][i-1] = 0                        
+
                     # round,loop,frame_idx,obj_idx,#interactions,frame_iou,seq_iou,seq_jf
                     all_interactions_per_round[seq].append([round_num, loop, 
                                                            lowest_frame_index, list(map(int,object_ids - {0})), 
@@ -233,7 +210,7 @@ def evaluate(
                     for i in indexes:                        
                         if ious[i]<iou_threshold:                                                                
                             obj_index = clicker.get_next_click(refine_obj_index=i, time_step=num_interactions_for_sequence[lowest_frame_index])
-                            num_interactions_per_instance_for_sequence[lowest_frame_index][i]+=1                                      
+                            num_interactions_per_instance_for_sequence[lowest_frame_index][obj_index]+=1
                             point_sampled = True
                             break
                     if point_sampled:
@@ -243,7 +220,7 @@ def evaluate(
                         clicker.set_pred_masks(pred_masks)
                         ious = clicker.compute_iou()
                         if vis_path:
-                            clicker.save_visualization(vis_path, ious=ious, num_interactions=num_interactions_for_sequence[lowest_frame_index], round_num=round_num)
+                            clicker.save_visualization(vis_path_round, ious=ious, num_interactions=num_interactions_for_sequence[lowest_frame_index], round_num=round_num, save_tensor=pred_masks, save_masks=save_masks)
                         
                         frame_avg_iou = sum(ious)/len(ious)
                         instance_level_iou[lowest_frame_index] = [iou.tolist() for iou in ious]
@@ -310,6 +287,9 @@ def evaluate(
                 iou_for_sequence = compute_iou_for_sequence(out_masks, all_gt_masks[seq])
                 seq_avg_iou = sum(iou_for_sequence)/len(iou_for_sequence)
                 print(f'[PROPAGATION INFO][SEQ:{seq}][ROUND:{round_num}] Prediction results: Average IoU: {seq_avg_iou}, Average J&F: {seq_avg_jf}')
+                
+                if save_masks:
+                    np.save(os.path.join(vis_path_round, f"propagation_J&F_{round(seq_avg_jf,2)}_Round_{round_num}.npy"), out_masks)
                 
                 all_interactions_per_round[seq].append([round_num, '-', '-', '-', sum(num_interactions_for_sequence), '-', seq_avg_iou, seq_avg_jf])
                 

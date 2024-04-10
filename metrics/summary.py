@@ -153,7 +153,7 @@ def summarize_round_results(df, iou_threshold):
             if val != '-':
                 frame_avg_iou.append(float(val))
             else:
-                if df_seq['frame_idx'][idx-1]=='0':
+                if df_seq['frame_idx'][idx-1]==0:
                     first_frame_final_iou = eval(df_seq['frame_avg_iou'][idx-1])
 
         

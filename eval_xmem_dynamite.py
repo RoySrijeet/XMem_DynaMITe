@@ -30,7 +30,7 @@ from detectron2.engine import (
 )
 from dynamite.utils.misc import default_argument_parser
 
-from detectron2.projects.deeplab import add_deeplab_config, build_lr_scheduler
+# from detectron2.projects.deeplab import add_deeplab_config, build_lr_scheduler
 from detectron2.solver.build import maybe_add_gradient_clipping
 from detectron2.utils.logger import setup_logger
 
@@ -148,7 +148,7 @@ class Trainer(DefaultTrainer):
                     os.makedirs(save_path, exist_ok=True) 
 
                     print(f'[INFO] Starting evaluation...')
-                    vis_path_vis = os.path.join(vis_path, 'vis')
+                    vis_path_vis = os.path.join(save_path, 'vis')
                     os.makedirs(vis_path_vis, exist_ok=True)
                     results_i = evaluate(dynamite_model, xmem_model, 
                                         dataloader_dict, all_images, all_gt_masks,
@@ -220,7 +220,7 @@ def setup(args):
     print('[INFO] Setting up DynaMITE...')
     cfg = get_cfg()
     # for poly lr schedule
-    add_deeplab_config(cfg)
+    #add_deeplab_config(cfg)
     add_maskformer2_config(cfg)                 
     add_hrnet_config(cfg)
     cfg.merge_from_file(args.config_file)       # path to config file
@@ -240,7 +240,7 @@ def main(args):
 
     # for evaluation
     if args.eval_only:
-        print('[INFO] DynaMITExMiVOS Evaluation!')
+        print('[INFO] DynaMITExXMem Evaluation!')
         torch.autograd.set_grad_enabled(False)
 
         print('[INFO] Building model...')

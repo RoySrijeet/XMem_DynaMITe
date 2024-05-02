@@ -24,7 +24,7 @@ class XMem(nn.Module):
         model_weights = self.init_hyperparameters(config, model_path, map_location)
 
         self.single_object = config.get('single_object', False)
-        print(f'Single object mode: {self.single_object}')
+        print(f'[XMEM INFO] Single object mode: {self.single_object}')
 
         self.key_encoder = KeyEncoder()
         self.value_encoder = ValueEncoder(self.value_dim, self.hidden_dim, self.single_object)
@@ -150,26 +150,26 @@ class XMem(nn.Module):
                 self.hidden_dim = 0
             else:
                 self.hidden_dim = model_weights['decoder.hidden_update.transform.weight'].shape[0]//3
-            print(f'Hyperparameters read from the model weights: '
+            print(f'[XMEM INFO] Hyperparameters read from the model weights: '
                     f'C^k={self.key_dim}, C^v={self.value_dim}, C^h={self.hidden_dim}')
         else:
             model_weights = None
             # load dimensions from config or default
             if 'key_dim' not in config:
                 self.key_dim = 64
-                print(f'key_dim not found in config. Set to default {self.key_dim}')
+                print(f'[XMEM INFO] key_dim not found in config. Set to default {self.key_dim}')
             else:
                 self.key_dim = config['key_dim']
 
             if 'value_dim' not in config:
                 self.value_dim = 512
-                print(f'value_dim not found in config. Set to default {self.value_dim}')
+                print(f'[XMEM INFO] value_dim not found in config. Set to default {self.value_dim}')
             else:
                 self.value_dim = config['value_dim']
 
             if 'hidden_dim' not in config:
                 self.hidden_dim = 64
-                print(f'hidden_dim not found in config. Set to default {self.hidden_dim}')
+                print(f'[XMEM INFO] hidden_dim not found in config. Set to default {self.hidden_dim}')
             else:
                 self.hidden_dim = config['hidden_dim']
 
@@ -186,13 +186,13 @@ class XMem(nn.Module):
         for k in list(src_dict.keys()):
             if k == 'value_encoder.conv1.weight':
                 if src_dict[k].shape[1] == 4:
-                    print('Converting weights from single object to multiple objects.')
+                    print('[XMEM INFO] Converting weights from single object to multiple objects.')
                     pads = torch.zeros((64,1,7,7), device=src_dict[k].device)
                     if not init_as_zero_if_needed:
-                        print('Randomly initialized padding.')
+                        print('[XMEM INFO] Randomly initialized padding.')
                         nn.init.orthogonal_(pads)
                     else:
-                        print('Zero-initialized padding.')
+                        print('[XMEM INFO] Zero-initialized padding.')
                     src_dict[k] = torch.cat([src_dict[k], pads], 1)
 
         self.load_state_dict(src_dict)

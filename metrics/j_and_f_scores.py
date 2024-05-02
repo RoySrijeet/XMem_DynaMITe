@@ -2,9 +2,11 @@
 
 from __future__ import absolute_import, division
 
+import os
 import cv2
 import math
 import numpy as np
+from PIL import Image
 from skimage.morphology import disk
 
 __all__ = ['batched_jaccard', 'batched_f_measure']
@@ -257,3 +259,26 @@ def batched_f_measure(y_true,
         f_measure_mean = f_measure_result.mean(axis=1)
         return f_measure_mean, f_measure_result
     return f_measure_result
+
+def compute_score(y_pred, seq_name, gt_masks=None):
+    y_pred = np.array(y_pred).astype('uint8')
+    print(y_pred.shape)
+    if not gt_masks:
+        # gt masks
+        anno_root = os.path.join('/globalwork/roy/dynamite_video/mivos_dynamite/MiVOS_DynaMITe/datasets/DAVIS/DAVIS-2017-trainval/Annotations/480p/', seq_name)
+        gt_mask_files = sorted([f for f in os.listdir(anno_root) if f.endswith('.png')])        
+        print(len(gt_mask_files))
+        assert y_pred.shape[0] == len(gt_mask_files)
+
+        gt_masks = []
+        for f in gt_mask_files:
+            gt_masks.append(np.array(Image.open(os.path.join(anno_root,f))))
+        gt_masks = np.array(gt_masks).astype('uint8')
+    
+    assert y_pred.shape == gt_masks.shape
+
+    jaccard_mean, jaccard_instances = batched_jaccard(y_true=gt_masks, y_pred=y_pred, average_over_objects=True)
+    contour_mean, contour_instances = batched_f_measure(y_true=gt_masks, y_pred=y_pred, average_over_objects=True)
+    j_and_f = 0.5*jaccard_mean + 0.5*contour_mean
+    j_and_f = j_and_f.tolist()
+    return sum(j_and_f)/len(j_and_f)

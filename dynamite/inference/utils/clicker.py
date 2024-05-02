@@ -6,6 +6,7 @@ from dynamite.data.dataset_mappers.utils import create_circular_mask
 import os
 from dynamite.utils.misc import color_map
 import copy
+from PIL import Image
 
 class Clicker:
 
@@ -50,8 +51,10 @@ class Clicker:
         self.pred_masks = None
         self._set_gt_info()
 
+        self.palette = Image.open('/globalwork/roy/dynamite_video/mivos_dynamite/MiVOS_DynaMITe/datasets/DAVIS/DAVIS-2017-trainval/Annotations/480p/blackswan/00000.png').getpalette()
         
         self.max_timestamps = [self.num_instances-1]    # num_instances initialized in _set_gt_info()
+        
     
     def _set_gt_info(self):
 
@@ -286,7 +289,7 @@ class Clicker:
             self.pred_masks = self.pred_masks[index][None,:,:] 
             return [ious[index]]
 
-    def save_visualization(self, save_results_path, ious=None, num_interactions=None, alpha_blend =0.6, click_radius=5, round_num=0, save_masks=False):
+    def save_visualization(self, save_results_path, ious=None, num_interactions=None, alpha_blend =0.6, click_radius=5, round_num=0, save_masks=False, expt_path=None, seq_name=None):
         
         if num_interactions==0:     # no interactions on the image yet - gt mask
             result_masks_for_vis = self.gt_masks
@@ -343,7 +346,17 @@ class Clicker:
                 dummy_ += pred_masks[c] * (c+1)
             save_dir = os.path.join(save_results_path, 'masks')
             os.makedirs(save_dir, exist_ok=True)
-            cv2.imwrite(os.path.join(save_dir, f"mask_{str(self.inputs[0]['image_id'])}_interactions_{num_interactions}_iou_{iou_val}_round_{round_num}.png"), dummy_)   
+            img = Image.fromarray(dummy_.astype(np.uint8))
+            img.putpalette(self.palette)
+            img.save(os.path.join(save_dir, f"mask_{str(self.inputs[0]['image_id'])}_interactions_{num_interactions}_iou_{iou_val}_round_{round_num}.png"))         
+        
+            if expt_path:
+                filename = os.path.join(expt_path,f"{str(self.inputs[0]['image_id'])[-5:]}.png")
+                if os.path.isfile(filename):
+                    print(f"[DynaMITe INFO] Replacing mask for frame {str(self.inputs[0]['image_id'])[-5:]}")
+                img = Image.fromarray(dummy_.astype(np.uint8))
+                img.putpalette(self.palette)
+                img.save(filename)         
     
     def apply_mask(self, image, mask, color, alpha=0.5):
         for c in range(3):

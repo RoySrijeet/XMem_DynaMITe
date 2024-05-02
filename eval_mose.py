@@ -23,14 +23,14 @@ except ImportError:
     print('[XMEM INFO] Failed to import hickle. Fine if not using multi-scale testing.')
 
 
-def eval_xmem(config, seq, gt_masks=None, dynamite_preds=None):
+def eval_xmem(config, dataset_name):
     """
     Data preparation
     """
-    meta_dataset = LongTestDataset(path.join(config['generic_path']), size=config['size'])
-    output = config['output']
+    meta_dataset = LongTestDataset(path.join(config['generic_path']), size=config['size'], dataset_name=dataset_name)
+    output = config['generic_path']
     torch.autograd.set_grad_enabled(False)
-    palette = Image.open('/globalwork/roy/dynamite_video/mivos_dynamite/MiVOS_DynaMITe/datasets/DAVIS/DAVIS-2017-trainval/Annotations/480p/blackswan/00000.png').getpalette()
+    palette = Image.open('/globalwork/roy/dynamite_video/xmem_dynamite/XMem_DynaMITe/datasets/MOSE/valid/Annotations/00c28e4b/00000.png').getpalette()
 
     # Set up loader
     meta_loader = meta_dataset.get_datasets()
@@ -46,12 +46,11 @@ def eval_xmem(config, seq, gt_masks=None, dynamite_preds=None):
     total_process_time = 0
     total_frames = 0
     # Start eval
-    #for vid_reader in progressbar(meta_loader, max_value=len(meta_dataset), redirect_stdout=True):
-    for vid_reader in meta_loader:
+    for vid_reader in progressbar(meta_loader, max_value=len(meta_dataset), redirect_stdout=True):
+    #for vid_reader in meta_loader:
         loader = DataLoader(vid_reader, batch_size=1, shuffle=False, num_workers=2)
         vid_name = vid_reader.vid_name
-        if vid_name != seq:
-            continue
+        print(vid_name)
         vid_length = len(loader)
         # no need to count usage for LT if the video is not that long anyway
         config['enable_long_term_count_usage'] = (
@@ -66,27 +65,13 @@ def eval_xmem(config, seq, gt_masks=None, dynamite_preds=None):
         processor = InferenceCore(network, config=config)
         first_mask_loaded = False
         propagated_outputs=[[]]*vid_length
-        count = 0
         
-        curr = dynamite_preds[-1] 
-        dynamite_preds = sorted(dynamite_preds)
-        if config['cutoff'] and max(dynamite_preds)!=curr:            
-            ceil = dynamite_preds[dynamite_preds.index(curr)+1]
-        else:
-            ceil = len(vid_reader)
-        if config['cutoff'] and min(dynamite_preds)!=curr:
-            floor = dynamite_preds[dynamite_preds.index(curr)-1]
-        else:
-            floor = -1
-
         for ti, data in enumerate(loader):
-        #for ti in chain(range(curr, ceil), range(curr-1,floor,-1)):
             with torch.cuda.amp.autocast(enabled=not config['benchmark']):
                 data = vid_reader[ti]
                 rgb = data['rgb'].cuda()#[0]
                 msk = data.get('mask')                
                 if msk is not None:
-                    count += 1       
                     msk = torch.from_numpy(msk).unsqueeze(0)                     
                 info = data['info']
                 frame = info['frame']#[0]
@@ -158,42 +143,35 @@ def eval_xmem(config, seq, gt_masks=None, dynamite_preds=None):
                 if config['save_all'] or info['save']:#[0]:
                     # this_out_path = path.join(output, vid_name)
                     # os.makedirs(this_out_path, exist_ok=True)
-                    this_out_path = output
+                    this_out_path = os.path.join(output,vid_name)
                     out_mask = mapper.remap_index_mask(out_mask)
                     out_img = Image.fromarray(out_mask)
                     #if vid_reader.get_palette() is not None:
                     #    out_img.putpalette(vid_reader.get_palette())
                     out_img.putpalette(palette)
-                    out_img.save(os.path.join(this_out_path, frame[:-4]+'.png'))
-        
-        if config['cutoff']:
-            for ti in chain(range(ceil, vid_length), range(floor, -1,-1)):
-                with torch.cuda.amp.autocast(enabled=not config['benchmark']):
-                    data = vid_reader[ti]
-                    msk = data.get('mask')  
-                    propagated_outputs[ti]=msk     
-                    
-        print(f'[XMEM INFO] Mask found for {count} frames!')
-        break
+                    out_img.save(os.path.join(this_out_path, frame[:-4]+'.png'))                       
 
     # print(f'Total processing time: {total_process_time}')
     # print(f'Total processed frames: {total_frames}')
     # print(f'FPS: {total_frames / total_process_time}')
     # print(f'Max allocated memory (MB): {torch.cuda.max_memory_allocated() / (2**20)}')
     
-    return np.array(propagated_outputs).astype('uint8')
+    return
+    #return np.array(propagated_outputs).astype('uint8')
 
 
 if __name__ =='__main__':
     """
     Arguments loading
     """
+    dataset_name = 'mose_val'
     parser = ArgumentParser()
     parser.add_argument('--model', default='./saves/XMem.pth')
+    parser.add_argument('--dataset_root', default=None)
 
     # Data options
     # For generic (G) evaluation, point to a folder that contains "JPEGImages" and "Annotations"
-    parser.add_argument('--generic_path')
+    parser.add_argument('--generic_path', default=None)
     parser.add_argument('--output', default=None)
     parser.add_argument('--save_all', action='store_true', 
                 help='Save all frames. Useful only in YouTubeVOS/long-time video', )
@@ -221,5 +199,12 @@ if __name__ =='__main__':
     args = parser.parse_args()
     config = vars(args)
     config['enable_long_term'] = not config['disable_long_term']
-
-    eval_xmem(config)
+    
+    root_ = '/globalwork/roy/dynamite_video/results/xmem_dynamite/mose/table_three/two_interactions_per_round/5_rounds'
+    for expt in ['iou_85', 'iou_90', 'iou_95']:
+        config['dataset_root'] = os.path.join(root_,expt)
+        expt_path = os.path.join(config['dataset_root'], 'xmem_propagation')
+        config['generic_path'] = os.path.join(expt_path,'Annotations')  
+        print(f'Datapath: {config["generic_path"]}')
+        
+        eval_xmem(config,dataset_name)

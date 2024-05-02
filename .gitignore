@@ -12,6 +12,9 @@ datasets/
 !dynamite/data/datasets/
 davis2017-evaluation/
 xmem_dynamite_eval.sh
+xmem_dynamite_eval_2.sh
+random_best_worst_mono.py
+random_best_worst_duo.py
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

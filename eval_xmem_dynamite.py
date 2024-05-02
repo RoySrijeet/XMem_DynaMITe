@@ -1,6 +1,5 @@
 #Adapted by Srijeet Roy from: https://github.com/amitrana001/DynaMITe/blob/main/train_net.py
 
-import csv
 import numpy as np
 try:
     from shapely.errors import ShapelyDeprecationWarning
@@ -9,8 +8,12 @@ try:
 except:
     pass
 
-import copy
+import os
 import itertools
+from PIL import Image
+from torchvision import transforms
+from collections import defaultdict
+import json
 import logging
 
 from typing import Any, Dict, List, Set
@@ -44,22 +47,7 @@ from dynamite import (
 )
 
 from dynamite.inference.utils.eval_utils import log_single_instance, log_multi_instance
-# MiVOS
-# from model.propagation.prop_net import PropagationNetwork
-# from model.fusion_net import FusionNet
 
-# XMem
-from model.network import XMem
-from inference.inference_core import InferenceCore
-from inference.data.test_datasets import DAVISTestDataset
-from inference.data.mask_mapper import MaskMapper
-
-import os
-from collections import defaultdict
-import pandas as pd
-from PIL import Image
-from torchvision import transforms
-import json
 from metrics.summary import summarize_results,summarize_round_results
 
 
@@ -70,7 +58,11 @@ _DATASET_PATH = {
         "images": "DAVIS/DAVIS-2017-trainval/JPEGImages/480p",
         "sets": "DAVIS/DAVIS-2017-trainval/ImageSets/2017/val.txt",
     },
-    "mose": {},
+    "mose_val": {
+        "annotations": "MOSE/valid/Annotations",
+        "images":"MOSE/valid/JPEGImages",
+        "sets":"",
+    },
     "kitti_mots_val": {},
 }
 
@@ -85,7 +77,7 @@ class Trainer(DefaultTrainer):
         return build_detection_test_loader(cfg, dataset_name, mapper=mapper)        # d2 call
     
     @classmethod
-    def interactive_evaluation(cls, cfg, dynamite_model,xmem_model, args=None, xmem_config=None):
+    def interactive_evaluation(cls, cfg, dynamite_model, args=None, xmem_config=None):
         """
         Evaluate the given model. The given model is expected to already contain
         weights to evaluate.
@@ -105,6 +97,7 @@ class Trainer(DefaultTrainer):
             max_interactions = args.max_interactions
             max_rounds = args.max_rounds
             save_masks = args.save_masks
+            debug = args.debug
         
         if not isinstance(iou_threshold, list):                
             iou_threshold = [iou_threshold]
@@ -113,11 +106,15 @@ class Trainer(DefaultTrainer):
 
         for dataset_name in eval_datasets:
 
-            if dataset_name in ["davis_2017_val","mose","sbd_multi_insts","coco_2017_val"]:
+            if dataset_name in ["davis_2017_val","mose_val","sbd_multi_insts","coco_2017_val"]:
                 print(f'[INFO] Initiating Multi-Instance Evaluation on {eval_datasets}...')
                 
                 if eval_strategy in ["random", "best", "worst"]:
-                    from dynamite.inference.multi_instance.random_best_worst import evaluate
+                    if dataset_name != "mose_val":
+                        from dynamite.inference.multi_instance.random_best_worst import evaluate
+                        #from dynamite.inference.multi_instance.random_best_worst_mono import evaluate
+                    else:
+                        from dynamite.inference.multi_instance.random_best_worst_mose import evaluate
                 elif eval_strategy == "max_dt":
                     from dynamite.inference.multi_instance.max_dt import evaluate
                 elif eval_strategy == "wlb":
@@ -127,10 +124,15 @@ class Trainer(DefaultTrainer):
                 
                 print(f'[INFO] Loaded Evaluation routine following {eval_strategy} evaluation strategy!')
 
-                print(f'[INFO] Loading all frames from the disc...')
-                all_images = load_images(dataset_name)
                 print(f'[INFO] Loading all ground truth masks from the disc...')
-                all_gt_masks = load_gt_masks(dataset_name)
+                all_gt_masks = load_gt_masks(dataset_name, debug)
+                if dataset_name != "mose_val":
+                    print(f'[INFO] Loading all frames from the disc...')
+                    all_images = load_images(dataset_name, debug)                
+                    assert len(all_images) == len(all_gt_masks)
+                    print(f'[INFO] Loaded {len(all_images)} sequences.')
+                else:
+                    all_images = {}
                 
                 print(f'[INFO] Loading test data loader from {dataset_name}...')
                 data_loader = cls.build_test_loader(cfg, dataset_name)
@@ -140,17 +142,23 @@ class Trainer(DefaultTrainer):
                 # iterate through the data_loader, one image at a time
                 for idx, inputs in enumerate(data_loader):                     
                     curr_seq_name = inputs[0]["file_name"].split('/')[-2]
+                    if debug and curr_seq_name != list(all_images.keys())[0]:
+                        break
                     dataloader_dict[curr_seq_name].append([idx, inputs])
+                del data_loader
 
                 for interactions, iou in list(itertools.product(max_interactions,iou_threshold)):
                     save_path = os.path.join(vis_path, f'{interactions}_interactions/iou_{int(iou*100)}')
                     #save_path = vis_path
                     os.makedirs(save_path, exist_ok=True) 
+                    expt_path = os.path.join(save_path, 'xmem_propagation')
+                    os.makedirs(expt_path, exist_ok=True)
 
                     print(f'[INFO] Starting evaluation...')
                     vis_path_vis = os.path.join(save_path, 'vis')
                     os.makedirs(vis_path_vis, exist_ok=True)
-                    results_i = evaluate(dynamite_model, xmem_model, 
+                    results_i = evaluate(dynamite_model,
+                                        xmem_config,
                                         dataloader_dict, all_images, all_gt_masks,
                                         iou_threshold = iou,
                                         max_interactions = interactions,
@@ -158,60 +166,73 @@ class Trainer(DefaultTrainer):
                                         seed_id=seed_id,
                                         vis_path=vis_path_vis,
                                         max_rounds=max_rounds,
-                                        xmem_config=xmem_config,
                                         dataset_name=dataset_name,
-                                        save_masks = save_masks)
+                                        save_masks=True,
+                                        expt_path=expt_path)
                     
                     print(f'[INFO] Evaluation complete for dataset {dataset_name}: IoU threshold={iou}, Interaction budget={interactions}!')
 
                     with open(os.path.join(save_path,f'results_{interactions}_interactions_iou_{int(iou*100)}.json'), 'w') as f:
                         json.dump(results_i, f)
                     
-                    summary, df = summarize_results(results_i)
-                    df.to_csv(os.path.join(save_path, f'round_results_{interactions}_interactions_iou_{int(iou*100)}.csv'))
-                    with open(os.path.join(save_path,f'summary_{interactions}_interactions_iou_{int(iou*100)}.json'), 'w') as f:
-                        json.dump(summary, f)
-                    
-                    summary_df = summarize_round_results(df, iou_threshold)
-                    summary_df.to_csv(os.path.join(save_path, f'round_summary_{interactions}_interactions_iou_{int(iou*100)}.csv'))
+                    if dataset_name != "mose_val":
+                        summary, df = summarize_results(results_i)
+                        df.to_csv(os.path.join(save_path, f'round_results_{interactions}_interactions_iou_{int(iou*100)}.csv'))
+                        with open(os.path.join(save_path,f'summary_{interactions}_interactions_iou_{int(iou*100)}.json'), 'w') as f:
+                            json.dump(summary, f)
+                        
+                        summary_df = summarize_round_results(df, iou)
+                        summary_df.to_csv(os.path.join(save_path, f'round_summary_{interactions}_interactions_iou_{int(iou*100)}.csv'))
+                    del results_i
 
-def load_images(dataset_name="davis_2017_val"):
-    val_set = os.path.join(_root,_DATASET_PATH[dataset_name]["sets"])
-
-    with open(val_set, 'r') as f:
-        seqs = [line.rstrip('\n') for line in f.readlines()]
-    all_images = {}
-    
-    image_path = os.path.join(_root,_DATASET_PATH[dataset_name]["images"] )
+                
+def load_images(dataset_name="davis_2017_val", debug_mode=False):
+    image_path = os.path.join(_root,_DATASET_PATH[dataset_name]["images"])
+    if dataset_name=="mose_val":
+        seqs = sorted([f for f in os.listdir(image_path) if os.path.isdir(os.path.join(image_path,f))])
+    else:
+        val_set = os.path.join(_root,_DATASET_PATH[dataset_name]["sets"])
+        with open(val_set, 'r') as f:
+            seqs = [line.rstrip('\n') for line in f.readlines()]
+    all_images = {}    
     transform = transforms.Compose([transforms.ToTensor()])
     for s in seqs:
         seq_images = []
         seq_path = os.path.join(image_path, s)
-        for file in os.listdir(seq_path):
+        imagefiles = sorted([f for f in os.listdir(seq_path)])
+        for file in imagefiles:
             if file.endswith('.jpg') or file.endswith('.png'):
                 im = Image.open(os.path.join(seq_path, file))
                 im = transform(im)
                 seq_images.append(im)
         seq_images = torch.stack(seq_images)
         all_images[s] = seq_images
+        if debug_mode:
+            break
     return all_images
 
-def load_gt_masks(dataset_name):
-    val_set = os.path.join(_root,_DATASET_PATH[dataset_name]["sets"])
-    with open(val_set, 'r') as f:
-        seqs = [line.rstrip('\n') for line in f.readlines()]
-    all_gt_masks = {}
+def load_gt_masks(dataset_name="davis_2017_val", debug_mode=False):
     mask_path = os.path.join(_root,_DATASET_PATH[dataset_name]["annotations"])
+    if dataset_name=="mose_val":
+        seqs = sorted([f for f in os.listdir(mask_path) if os.path.isdir(os.path.join(mask_path,f))])
+    else:
+        val_set = os.path.join(_root,_DATASET_PATH[dataset_name]["sets"])
+        with open(val_set, 'r') as f:
+            seqs = [line.rstrip('\n') for line in f.readlines()]
+    all_gt_masks = {}
     for s in seqs:
         seq_images = []
         seq_path = os.path.join(mask_path, s)
-        for file in os.listdir(seq_path):
+        maskfiles = sorted([f for f in os.listdir(seq_path)])
+        for file in maskfiles:
             if file.endswith('.jpg') or file.endswith('.png'):
                 im = np.asarray(Image.open(os.path.join(seq_path, file)))
                 seq_images.append(im)
         seq_images = np.asarray(seq_images)
         all_gt_masks[s] = seq_images
-    return all_gt_masks               
+        if debug_mode:
+            break
+    return all_gt_masks
 
 def setup(args):
     """
@@ -254,53 +275,33 @@ def main(args):
         # XMem args -
         xmem_config={}
         xmem_config['model'] = './saves/XMem.pth'           # pre-trained XMem weights
-        xmem_config['d16_path'] = '../DAVIS/2016'           # path to DAVIS 2016
-        xmem_config['d17_path'] = '../DAVIS/2017'           # path to DAVIS 2017
-        xmem_config['y18_path']='../YouTube2018'            # path to YouTube2018
-        xmem_config['y19_path']='../YouTube'                # path to YouTube
-        xmem_config['lv_path'] ='../long_video_set'         # path to long_video_set
         xmem_config['generic_path'] = None                  # for generic eval - a folder that contains "JPEGImages" and "Annotations"
-        xmem_config['dataset'] = 'D17'                      # D16/D17/Y18/Y19/LV1/LV3/G
-        xmem_config['split'] = 'val'                        # val/test
-        xmem_config['output'] = args.vis_path               
-        xmem_config['save_all'] = False                     # save all frames - useful only in YouTubeVOS/long-time video
+        xmem_config['output'] = None               
+        xmem_config['save_all'] = True                     # save all frames - useful only in YouTubeVOS/long-time video
         xmem_config['benchmark'] = False                    # enable to disable amp for FPS benchmarking
         # long-term memory options
         xmem_config['disable_long_term'] = False
         xmem_config['max_mid_term_frames']= 10              # T_max in paper, decrease to save memory 
         xmem_config['min_mid_term_frames']= 5               # T_min in paper, decrease to save memory
-        xmem_config['max_long_term_elements']= 10000        # LT_max in paper, increase if objects disappear for a long time
-        xmem_config['num_prototypes']= 128                  # P in paper
+        xmem_config['max_long_term_elements']= 10000        # LT_max in paper, increase if objects disappear for a long time (default 10000)
+        xmem_config['num_prototypes']= 128                  # P in paper (default 128)
         xmem_config['top_k']= 30
         xmem_config['mem_every']= 5                         # r in paper. Increase to improve running speed
         xmem_config['deep_update_every']= -1                # Leave -1 normally to synchronize with mem_every
         # multi-scale options
         xmem_config['save_scores']= False
         xmem_config['flip']= False
-        xmem_config['size']= 480                            # Resize the shorter side to this size. -1 to use original resolution
+        xmem_config['size']= 480                            # Resize the shorter side to this size (default 480). -1 to use original resolution
         xmem_config['enable_long_term'] = not xmem_config['disable_long_term']
 
-        # XMem data prep
-        #meta_dataset = DAVISTestDataset(os.path.join(xmem_config['d17_path'], 'trainval'), imset='2017/val.txt', size=xmem_config['size'])
-        #meta_loader = meta_dataset.get_datasets()
+        # bidirectional propagation
+        xmem_config['cutoff'] = True        # if True, bidirectional propagation cuts off at nearest DynaMITe-refined frames
 
-        # XMem load
-        torch.autograd.set_grad_enabled(False)
-        path_to_weights = xmem_config['model']
-        xmem = XMem(xmem_config, path_to_weights).cuda().eval()
-        xmem_weights = torch.load(path_to_weights)
-        xmem.load_weights(xmem_weights, init_as_zero_if_needed=True)
-        print(f'[INFO] XMem loaded!')
-
-        res = Trainer.interactive_evaluation(cfg,dynamite_model, xmem, args, xmem_config)
+        res = Trainer.interactive_evaluation(cfg, dynamite_model, args, xmem_config)
 
         return res
 
     else:
-        # for training
-        # trainer = Trainer(cfg)
-        # trainer.resume_or_load(resume=args.resume)
-        # return trainer.train()
         print(f'[INFO] Training routine... Not Implemented')
 
 

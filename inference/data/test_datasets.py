@@ -6,15 +6,20 @@ from inference.data.video_reader import VideoReader
 
 
 class LongTestDataset:
-    def __init__(self, data_root, size=-1):
-        self.image_dir = path.join(data_root, 'JPEGImages')
-        self.mask_dir = path.join(data_root, 'Annotations')
+    def __init__(self, data_root, size=-1, dataset_name='davis_2017_val'):
+        #self.image_dir = path.join(data_root, 'JPEGImages')
+        self.image_dir = '/globalwork/roy/dynamite_video/xmem_dynamite/XMem_DynaMITe/datasets/DAVIS/DAVIS-2017-trainval/JPEGImages/480p'
+        if dataset_name == 'mose_val':
+            self.image_dir = '/globalwork/roy/dynamite_video/xmem_dynamite/XMem_DynaMITe/datasets/MOSE/valid/JPEGImages'
+        print(f'[LONG TEST DATASET] Image Directory: {self.image_dir}')
+        self.mask_dir = data_root
+        print(f'[LONG TEST DATASET] Mask Directory: {self.mask_dir}')
         self.size = size
 
-        self.vid_list = sorted(os.listdir(self.image_dir))
+        self.vid_list = sorted(os.listdir(self.mask_dir))
 
     def get_datasets(self):
-        for video in self.vid_list:
+        for video in self.vid_list:        
             yield VideoReader(video, 
                 path.join(self.image_dir, video), 
                 path.join(self.mask_dir, video),
@@ -22,6 +27,7 @@ class LongTestDataset:
                     name[:-4] for name in os.listdir(path.join(self.mask_dir, video))
                 ],
                 size=self.size,
+                use_all_mask=True
             )
 
     def __len__(self):

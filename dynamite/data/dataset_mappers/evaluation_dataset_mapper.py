@@ -66,6 +66,7 @@ class EvaluationDatasetMapper:
         self.img_format = image_format
         self.is_train = is_train
         self.dataset_name = dataset_name
+        print(f'EVALUATION DATASET MAPPER: {self.dataset_name}')
     
     @classmethod
     def from_config(cls, cfg, is_train=True, dataset_name=None):
@@ -93,6 +94,10 @@ class EvaluationDatasetMapper:
         # reads the file as a PIL.Image, then converts it to a np.ndarray
         # supported types: modes supported in PIL, or "BGR" or "YUV-BT.601"
         image = utils.read_image(dataset_dict["file_name"], format=self.img_format)
+
+        if self.dataset_name == 'mose_val':
+            if not dataset_dict["file_name"].endswith('00000.jpg'):
+                return dataset_dict
         dataset_dict["image_orig"] = torch.as_tensor(np.ascontiguousarray(image.transpose(2,0,1)))    
 
         # check image resolution (height and width) with specifications mentioned in dataset_dict,
@@ -122,7 +127,7 @@ class EvaluationDatasetMapper:
         dataset_dict["padding_mask"] = torch.as_tensor(np.ascontiguousarray(padding_mask))
 
         # annotations - a list of dicts, one for each instance in the image
-        if "annotations" in dataset_dict:
+        if "annotations" in dataset_dict and len(dataset_dict["annotations"])>0:
             # USER: Modify this if you want to keep them for some reason.
             for anno in dataset_dict["annotations"]:        # for each instance, there's a dict
                 # Let's always keep mask
@@ -199,6 +204,14 @@ class EvaluationDatasetMapper:
                 return None
 
             dataset_dict["instances"] = new_instances
+        
+        else:
+            dataset_dict['semantic_map'] = None
+            dataset_dict["orig_fg_click_coords"] = None
+            dataset_dict["fg_click_coords"] = None
+            dataset_dict["bg_click_coords"] = None
+            dataset_dict["num_clicks_per_object"] = None
+            dataset_dict["instances"] = None
 
         return dataset_dict
 

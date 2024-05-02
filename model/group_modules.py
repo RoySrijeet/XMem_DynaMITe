@@ -15,7 +15,7 @@ import torch.nn.functional as F
 def interpolate_groups(g, ratio, mode, align_corners):
     batch_size, num_objects = g.shape[:2]
     g = F.interpolate(g.flatten(start_dim=0, end_dim=1), 
-                scale_factor=ratio, mode=mode, align_corners=align_corners)
+                scale_factor=ratio, mode=mode, align_corners=align_corners,recompute_scale_factor=True)
     g = g.view(batch_size, num_objects, *g.shape[1:])
     return g
 

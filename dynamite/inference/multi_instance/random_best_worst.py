@@ -16,6 +16,7 @@ from ..utils.predictor import Predictor
 from PIL import Image
 from metrics.j_and_f_scores import batched_jaccard,batched_f_measure
 from eval import eval_xmem
+import gc
 
 
 def evaluate(
@@ -48,7 +49,8 @@ def evaluate(
     all_contour = {}
     all_ious = {}
     all_instance_level_iou = {}
-    copy_iou_checkpoints = [0.85, 0.90, 0.95, 0.99]    
+    copy_iou_checkpoints = [0.85, 0.90, 0.95, 0.99]
+    progress_report = {}
 
     with ExitStack() as stack:                                           
 
@@ -92,6 +94,7 @@ def evaluate(
             seq_avg_iou = 0                                                          # records average IoU for the sequence
             seq_avg_jf = 0                                                           # records average J&F for the sequence
             iou_checkpoints = copy.deepcopy(copy_iou_checkpoints)                    # IoU checkpoints
+            progress_report[seq] = {}
             
             instance_level_iou = [[]] * num_frames
             dynamite_preds = []
@@ -143,8 +146,7 @@ def evaluate(
                 # instance-wise IoU
                 ious = clicker.compute_iou()
                 instance_level_iou[lowest_frame_index] = [iou.tolist() for iou in ious]
-                frame_avg_iou = sum(ious)/len(ious)                                                                        
-                
+                frame_avg_iou = sum(ious)/len(ious)                
                 
                 # record the interaction, if the frame has never been interacted with
                 if not repeat:
@@ -161,7 +163,7 @@ def evaluate(
                    clicker.save_visualization(vis_path_round, ious=ious, num_interactions=num_interactions_for_sequence[lowest_frame_index], round_num=round_num, save_masks=save_masks)             
                 
                 # interaction limit
-                max_iters_for_image = max_interactions * num_instances                                      
+                max_iters_for_image = max_interactions * num_instances
                 point_sampled = True
                 random_indexes = list(range(len(ious)))
 
@@ -236,12 +238,10 @@ def evaluate(
                     #iou_for_sequence = compute_iou_for_sequence(out_masks, all_gt_masks[seq])
                     iou_for_sequence = jaccard_mean.tolist()
                     seq_avg_iou = sum(iou_for_sequence)/len(iou_for_sequence)
-                    print(f'[PROPAGATION INFO][SEQ:{seq}][ROUND:{round_num}] Prediction results: Average IoU: {seq_avg_iou}, Average J&F: {seq_avg_jf}')
-                    
-                    # if save_masks:
-                    #     np.save(os.path.join(vis_path_round, f"propagation_J&F_{round(seq_avg_jf,2)}_Round_{round_num}.npy"), out_masks.astype('uint8'))
+                    print(f'[PROPAGATION INFO][SEQ:{seq}][ROUND:{round_num}] Prediction results: Average IoU: {seq_avg_iou}, Average J&F: {seq_avg_jf}')                                        
                     
                     all_interactions_per_round[seq].append([round_num, '-', '-', '-', sum(num_interactions_for_sequence), '-', seq_avg_iou, seq_avg_jf])
+                    progress_report[seq][round_num] = {'J_AND_F': seq_avg_jf, 'J': seq_avg_iou, 'J_AND_F_FRAME': j_and_f, 'J_FRAME': iou_for_sequence}
                     
                     # Check stopping criteria
                     frame_list = [i for i in range(num_frames)]
@@ -269,7 +269,7 @@ def evaluate(
                         else:
                             lowest_frame_index = -1
                             print(f'[STOPPING CRITERIA][SEQ:{seq}][ROUND:{round_num}] All frames meet IoU requirement!')
-                            break
+                            break                                        
                          
 
                 if torch.cuda.is_available():
@@ -291,7 +291,7 @@ def evaluate(
             del clicker_dict, predictor_dict
             del all_frames, num_interactions_for_sequence   
             del iou_for_sequence, jaccard_instances, jaccard_mean, contour_instances, contour_mean
-
+            gc.collect()
 
     results = {
                 'iou_threshold': iou_threshold,
@@ -314,7 +314,7 @@ def evaluate(
                 'all_ious': all_ious,
     }
 
-    return results
+    return results, progress_report
 
 
 @contextmanager

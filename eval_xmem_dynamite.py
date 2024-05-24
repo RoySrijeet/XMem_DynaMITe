@@ -49,7 +49,8 @@ from dynamite import (
 from dynamite.inference.utils.eval_utils import log_single_instance, log_multi_instance
 
 from metrics.summary import summarize_results,summarize_round_results
-
+import copy
+import gc
 
 _root = "/globalwork/roy/dynamite_video/xmem_dynamite/XMem_DynaMITe/datasets/"
 _DATASET_PATH = {
@@ -77,7 +78,9 @@ class Trainer(DefaultTrainer):
         return build_detection_test_loader(cfg, dataset_name, mapper=mapper)        # d2 call
     
     @classmethod
-    def interactive_evaluation(cls, cfg, dynamite_model, args=None, xmem_config=None):
+    def interactive_evaluation(cls, cfg, dynamite_model, interactions, iou, 
+                                all_images, all_gt_masks, dataloader_dict, 
+                                args=None, xmem_config=None):
         """
         Evaluate the given model. The given model is expected to already contain
         weights to evaluate.
@@ -112,7 +115,6 @@ class Trainer(DefaultTrainer):
                 if eval_strategy in ["random", "best", "worst"]:
                     if dataset_name != "mose_val":
                         from dynamite.inference.multi_instance.random_best_worst import evaluate
-                        #from dynamite.inference.multi_instance.random_best_worst_mono import evaluate
                     else:
                         from dynamite.inference.multi_instance.random_best_worst_mose import evaluate
                 elif eval_strategy == "max_dt":
@@ -122,68 +124,48 @@ class Trainer(DefaultTrainer):
                 elif eval_strategy == "round_robin":
                     from dynamite.inference.multi_instance.round_robin import evaluate
                 
-                print(f'[INFO] Loaded Evaluation routine following {eval_strategy} evaluation strategy!')
+                print(f'[INFO] Loaded Evaluation routine following {eval_strategy} evaluation strategy!')                                
 
-                print(f'[INFO] Loading all ground truth masks from the disc...')
-                all_gt_masks = load_gt_masks(dataset_name, debug)
-                if dataset_name != "mose_val":
-                    print(f'[INFO] Loading all frames from the disc...')
-                    all_images = load_images(dataset_name, debug)                
-                    assert len(all_images) == len(all_gt_masks)
-                    print(f'[INFO] Loaded {len(all_images)} sequences.')
-                else:
-                    all_images = {}
+                print(f'Interactions: {interactions}')
+                print(f'IoU threshold: {iou}')
+                save_path = os.path.join(vis_path, f'{interactions}_interactions/iou_{int(iou*100)}')
+                #save_path = vis_path
+                os.makedirs(save_path, exist_ok=True) 
+                expt_path = os.path.join(save_path, 'xmem_propagation')
+                os.makedirs(expt_path, exist_ok=True)
+
+                print(f'[INFO] Starting evaluation...')
+                vis_path_vis = os.path.join(save_path, 'vis')
+                os.makedirs(vis_path_vis, exist_ok=True)
+                results_i, progress_report = evaluate(dynamite_model,
+                                    xmem_config,
+                                    dataloader_dict, all_images, all_gt_masks,
+                                    iou_threshold = iou,
+                                    max_interactions = interactions,
+                                    eval_strategy = eval_strategy,
+                                    seed_id=seed_id,
+                                    vis_path=vis_path_vis,
+                                    max_rounds=max_rounds,
+                                    dataset_name=dataset_name,
+                                    save_masks=True,
+                                    expt_path=expt_path)
                 
-                print(f'[INFO] Loading test data loader from {dataset_name}...')
-                data_loader = cls.build_test_loader(cfg, dataset_name)
-                print(f'[INFO] Data loader  preparation complete! length: {len(data_loader)}')
-                dataloader_dict = defaultdict(list)
-                print(f'[INFO] Iterating through the Data Loader...')
-                # iterate through the data_loader, one image at a time
-                for idx, inputs in enumerate(data_loader):                     
-                    curr_seq_name = inputs[0]["file_name"].split('/')[-2]
-                    if debug and curr_seq_name != list(all_images.keys())[0]:
-                        break
-                    dataloader_dict[curr_seq_name].append([idx, inputs])
-                del data_loader
+                print(f'[INFO] Evaluation complete for dataset {dataset_name}: IoU threshold={iou}, Interaction budget={interactions}!')
 
-                for interactions, iou in list(itertools.product(max_interactions,iou_threshold)):
-                    save_path = os.path.join(vis_path, f'{interactions}_interactions/iou_{int(iou*100)}')
-                    #save_path = vis_path
-                    os.makedirs(save_path, exist_ok=True) 
-                    expt_path = os.path.join(save_path, 'xmem_propagation')
-                    os.makedirs(expt_path, exist_ok=True)
-
-                    print(f'[INFO] Starting evaluation...')
-                    vis_path_vis = os.path.join(save_path, 'vis')
-                    os.makedirs(vis_path_vis, exist_ok=True)
-                    results_i = evaluate(dynamite_model,
-                                        xmem_config,
-                                        dataloader_dict, all_images, all_gt_masks,
-                                        iou_threshold = iou,
-                                        max_interactions = interactions,
-                                        eval_strategy = eval_strategy,
-                                        seed_id=seed_id,
-                                        vis_path=vis_path_vis,
-                                        max_rounds=max_rounds,
-                                        dataset_name=dataset_name,
-                                        save_masks=True,
-                                        expt_path=expt_path)
+                with open(os.path.join(save_path,f'results_{interactions}_interactions_iou_{int(iou*100)}.json'), 'w') as f:
+                    json.dump(results_i, f)
+                with open(os.path.join(save_path,f'progress_{interactions}_interactions_iou_{int(iou*100)}.json'), 'w') as f:
+                    json.dump(progress_report, f)
+                
+                if dataset_name != "mose_val":
+                    summary, df = summarize_results(results_i)
+                    df.to_csv(os.path.join(save_path, f'round_results_{interactions}_interactions_iou_{int(iou*100)}.csv'))
+                    with open(os.path.join(save_path,f'summary_{interactions}_interactions_iou_{int(iou*100)}.json'), 'w') as f:
+                        json.dump(summary, f)
                     
-                    print(f'[INFO] Evaluation complete for dataset {dataset_name}: IoU threshold={iou}, Interaction budget={interactions}!')
-
-                    with open(os.path.join(save_path,f'results_{interactions}_interactions_iou_{int(iou*100)}.json'), 'w') as f:
-                        json.dump(results_i, f)
-                    
-                    if dataset_name != "mose_val":
-                        summary, df = summarize_results(results_i)
-                        df.to_csv(os.path.join(save_path, f'round_results_{interactions}_interactions_iou_{int(iou*100)}.csv'))
-                        with open(os.path.join(save_path,f'summary_{interactions}_interactions_iou_{int(iou*100)}.json'), 'w') as f:
-                            json.dump(summary, f)
-                        
-                        summary_df = summarize_round_results(df, iou)
-                        summary_df.to_csv(os.path.join(save_path, f'round_summary_{interactions}_interactions_iou_{int(iou*100)}.csv'))
-                    del results_i
+                    summary_df = summarize_round_results(df, iou)
+                    summary_df.to_csv(os.path.join(save_path, f'round_summary_{interactions}_interactions_iou_{int(iou*100)}.csv'))
+                del results_i
 
                 
 def load_images(dataset_name="davis_2017_val", debug_mode=False):
@@ -258,48 +240,81 @@ def main(args):
     cfg = setup(args)       # create configs 
     print('[INFO] Setup complete!')
 
+    dataset_name = args.eval_datasets[0]
+    # load data
+    print(f'[INFO] Loading all ground truth masks from the disc...')
+    all_gt_masks = load_gt_masks(dataset_name, args.debug)
+    if dataset_name != "mose_val":
+        print(f'[INFO] Loading all frames from the disc...')
+        all_images = load_images(dataset_name, args.debug)                
+        assert len(all_images) == len(all_gt_masks)
+        print(f'[INFO] Loaded {len(all_images)} sequences.')
+    else:
+        all_images = {}
+    
+    print(f'[INFO] Loading test data loader from {dataset_name}...')
+    data_loader = Trainer.build_test_loader(cfg, dataset_name)
+    print(f'[INFO] Data loader  preparation complete! length: {len(data_loader)}')
+    dataloader_dict = defaultdict(list)
+    print(f'[INFO] Iterating through the Data Loader...')
+    # iterate through the data_loader, one image at a time
+    for idx, inputs in enumerate(data_loader):                     
+        curr_seq_name = inputs[0]["file_name"].split('/')[-2]
+        if args.debug and curr_seq_name != list(all_images.keys())[0]:
+            break
+        dataloader_dict[curr_seq_name].append([idx, inputs])
+    del data_loader
 
+    for interactions, iou in list(itertools.product(args.max_interactions,args.iou_threshold)):
+        dataloader_dict_copy = copy.deepcopy(dataloader_dict)
     # for evaluation
-    if args.eval_only:
-        print('[INFO] DynaMITExXMem Evaluation!')
-        torch.autograd.set_grad_enabled(False)
+        if args.eval_only:
+            print('[INFO] DynaMITExXMem Evaluation!')
+            torch.autograd.set_grad_enabled(False)
 
-        print('[INFO] Building model...')
-        dynamite_model = Trainer.build_model(cfg)                                                # load model (torch.nn.Module)
-        print('[INFO] Loading model weights...')                                        
-        DetectionCheckpointer(dynamite_model, save_dir=cfg.OUTPUT_DIR).resume_or_load(           # d2 checkpoint load
-             cfg.MODEL.WEIGHTS, resume=args.resume
-        )
-        print('[INFO] DynaMITe loaded!')
+            print('[INFO] Building model...')
+            dynamite_model = Trainer.build_model(cfg)                                                # load model (torch.nn.Module)
+            print('[INFO] Loading model weights...')                                        
+            DetectionCheckpointer(dynamite_model, save_dir=cfg.OUTPUT_DIR).resume_or_load(           # d2 checkpoint load
+                cfg.MODEL.WEIGHTS, resume=args.resume
+            )
+            print('[INFO] DynaMITe loaded!')
 
-        # XMem args -
-        xmem_config={}
-        xmem_config['model'] = './saves/XMem.pth'           # pre-trained XMem weights
-        xmem_config['generic_path'] = None                  # for generic eval - a folder that contains "JPEGImages" and "Annotations"
-        xmem_config['output'] = None               
-        xmem_config['save_all'] = True                     # save all frames - useful only in YouTubeVOS/long-time video
-        xmem_config['benchmark'] = False                    # enable to disable amp for FPS benchmarking
-        # long-term memory options
-        xmem_config['disable_long_term'] = False
-        xmem_config['max_mid_term_frames']= 10              # T_max in paper, decrease to save memory 
-        xmem_config['min_mid_term_frames']= 5               # T_min in paper, decrease to save memory
-        xmem_config['max_long_term_elements']= 10000        # LT_max in paper, increase if objects disappear for a long time (default 10000)
-        xmem_config['num_prototypes']= 128                  # P in paper (default 128)
-        xmem_config['top_k']= 30
-        xmem_config['mem_every']= 5                         # r in paper. Increase to improve running speed
-        xmem_config['deep_update_every']= -1                # Leave -1 normally to synchronize with mem_every
-        # multi-scale options
-        xmem_config['save_scores']= False
-        xmem_config['flip']= False
-        xmem_config['size']= 480                            # Resize the shorter side to this size (default 480). -1 to use original resolution
-        xmem_config['enable_long_term'] = not xmem_config['disable_long_term']
+            # XMem args -
+            xmem_config={}
+            xmem_config['model'] = './saves/XMem.pth'           # pre-trained XMem weights
+            xmem_config['generic_path'] = None                  # for generic eval - a folder that contains "JPEGImages" and "Annotations"
+            xmem_config['output'] = None               
+            xmem_config['save_all'] = True                     # save all frames - useful only in YouTubeVOS/long-time video
+            xmem_config['benchmark'] = False                    # enable to disable amp for FPS benchmarking
+            # long-term memory options
+            xmem_config['disable_long_term'] = False
+            xmem_config['max_mid_term_frames']= 10              # T_max in paper, decrease to save memory 
+            xmem_config['min_mid_term_frames']= 5               # T_min in paper, decrease to save memory
+            xmem_config['max_long_term_elements']= 10000        # LT_max in paper, increase if objects disappear for a long time (default 10000)
+            xmem_config['num_prototypes']= 128                  # P in paper (default 128)
+            xmem_config['top_k']= 30
+            xmem_config['mem_every']= 5                         # r in paper. Increase to improve running speed
+            xmem_config['deep_update_every']= -1                # Leave -1 normally to synchronize with mem_every
+            # multi-scale options
+            xmem_config['save_scores']= False
+            xmem_config['flip']= False
+            xmem_config['size']= 480                            # Resize the shorter side to this size (default 480). -1 to use original resolution
+            xmem_config['enable_long_term'] = not xmem_config['disable_long_term']
 
-        # bidirectional propagation
-        xmem_config['cutoff'] = True        # if True, bidirectional propagation cuts off at nearest DynaMITe-refined frames
+            # bidirectional propagation
+            xmem_config['cutoff'] = True        # if True, bidirectional propagation cuts off at nearest DynaMITe-refined frames
 
-        res = Trainer.interactive_evaluation(cfg, dynamite_model, args, xmem_config)
+            res = Trainer.interactive_evaluation(cfg, dynamite_model, 
+                                                interactions, iou, 
+                                                all_images, all_gt_masks, dataloader_dict_copy,
+                                                args, xmem_config)
 
-        return res
+            #return res
+            print(f'Finished experiment: {interactions} interactions, at IoU threshold {iou}')
+            del dynamite_model, res, dataloader_dict_copy
+            torch.cuda.empty_cache()
+            gc.collect()
 
     else:
         print(f'[INFO] Training routine... Not Implemented')

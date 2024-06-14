@@ -178,7 +178,9 @@ def evaluate(
                                                            frame_avg_iou.item(),
                                                            seq_avg_iou, seq_avg_jf])
                 if vis_path:
-                   clicker.save_visualization(vis_path_round, ious=ious, num_interactions=num_interactions_for_sequence[lowest_frame_index], round_num=round_num, save_masks=save_masks)             
+                   clicker.save_visualization(vis_path_round, ious=ious, 
+                                            num_interactions=num_interactions_for_sequence[lowest_frame_index], 
+                                            round_num=round_num, save_masks=save_masks)             
                 
                 # interaction limit
                 max_iters_for_image = max_interactions * num_instances +1
@@ -190,10 +192,12 @@ def evaluate(
                     
                     while all(iou >= iou_checkpoints[0] for iou in ious):                                    # IoU checkpoints
                         t = iou_checkpoints.pop(0)
-                        print(f'[DynaMITe INFO][SEQ:{seq}][ROUND:{round_num}] Frame {lowest_frame_index} reached IoU Checkpoint {t} after {num_interactions_for_sequence[lowest_frame_index]} interactions.')
+                        print(f'[DynaMITe INFO][SEQ:{seq}][ROUND:{round_num}] Frame {lowest_frame_index} 
+                            reached IoU Checkpoint {t} after {num_interactions_for_sequence[lowest_frame_index]} interactions.')
                     
                     if all(iou >= iou_threshold for iou in ious):                                             # 2nd stopping criterion - if IoU threshold is reached
-                        print(f'[DynaMITe INFO][SEQ:{seq}][ROUND:{round_num}] Frame {lowest_frame_index} meets IoU Threshold {iou_threshold} after {num_interactions_for_sequence[lowest_frame_index]} interactions!')
+                        print(f'[DynaMITe INFO][SEQ:{seq}][ROUND:{round_num}] Frame {lowest_frame_index} 
+                            meets IoU Threshold {iou_threshold} after {num_interactions_for_sequence[lowest_frame_index]} interactions!')
                         break
 
                     loop += 1             
@@ -227,13 +231,17 @@ def evaluate(
                         clicker.set_pred_masks(pred_masks)
                         ious = clicker.compute_iou()
                         if vis_path:
-                            clicker.save_visualization(vis_path_round, ious=ious, num_interactions=num_interactions_for_sequence[lowest_frame_index], round_num=round_num, save_masks=save_masks)
+                            clicker.save_visualization(vis_path_round, ious=ious, 
+                                                    num_interactions=num_interactions_for_sequence[lowest_frame_index], 
+                                                    round_num=round_num, save_masks=save_masks)
                         
                         frame_avg_iou = sum(ious)/len(ious)
                         instance_level_iou[lowest_frame_index] = [iou.tolist() for iou in ious]
                         all_interactions_per_round[seq].append([round_num, loop, lowest_frame_index, int(obj_index), num_interactions_for_sequence[lowest_frame_index], frame_avg_iou.item(), seq_avg_iou, seq_avg_jf])
                 
-                clicker.save_visualization(vis_path_round, ious=ious, num_interactions=num_interactions_for_sequence[lowest_frame_index], round_num=round_num, save_masks=True, expt_path=xmem_config['output'], seq_name=seq)
+                clicker.save_visualization(vis_path_round, ious=ious, 
+                                        num_interactions=num_interactions_for_sequence[lowest_frame_index], 
+                                        round_num=round_num, save_masks=True, expt_path=xmem_config['output'], seq_name=seq)
 
                 # store clicker and predictor, in case this frame needs to be interacted with again
                 clicker_dict[lowest_frame_index] = clicker
@@ -242,11 +250,7 @@ def evaluate(
                 # XMEM
                 out_masks = eval_xmem(xmem_config, seq, all_gt_masks[seq], dynamite_preds)            
 
-                if dataset_name in ['mose_val', 'burst_val']:                    
-                    if save_masks:
-                        print(f'[PROPAGATION INFO][SEQ:{seq}][ROUND:{round_num}] Saving masks...')
-                        os.makedirs(os.path.join(vis_path, "mivos_propagation", seq.split('/')[0],seq.split('/')[1]), exist_ok=True)
-                        np.save(os.path.join(vis_path, "mivos_propagation", seq.split('/')[0],seq.split('/')[1],f"propagation_output_seq_{seq.split('/')[0]}_{seq.split('/')[1]}.npy"), out_masks)                    
+                if dataset_name in ['mose_val', 'burst_val']:
                     lowest_frame_index = -1 #stop round iter
                     break
                 else:
@@ -258,7 +262,6 @@ def evaluate(
                     j_and_f = j_and_f.tolist()
                     seq_avg_jf = sum(j_and_f)/len(j_and_f)
 
-                    #iou_for_sequence = compute_iou_for_sequence(out_masks, all_gt_masks[seq])
                     iou_for_sequence = jaccard_mean.tolist()
                     seq_avg_iou = sum(iou_for_sequence)/len(iou_for_sequence)
                     print(f'[PROPAGATION INFO][SEQ:{seq}][ROUND:{round_num}] Prediction results: Average IoU: {seq_avg_iou}, Average J&F: {seq_avg_jf}')                                        
@@ -271,7 +274,7 @@ def evaluate(
                     while True:
                         min_iou_index = np.unravel_index(np.argmin(jaccard_instances, axis=None), jaccard_instances.shape)
                         min_iou = jaccard_instances[min_iou_index]
-                        print(f'[EVALUATOR INFO][SEQ:{seq}][ROUND:{round_num}] Weakest frame (instance): idx: {min_iou_index}, value: {min_iou}')                        
+                        print(f'[EVALUATOR INFO][SEQ:{seq}][ROUND:{round_num}] Weakest frame (instance): idx: {min_iou_index}, value: {min_iou}')
                         if min_iou < iou_threshold:                                                         # 1. whether all frames meet IoU threshold
                             if round_num == max_rounds:                                                     # 2. whether round budget is over
                                 print(f'[STOPPING CRITERIA][SEQ:{seq}][ROUND:{round_num}] Maximum round limit ({max_rounds}) reached!')
@@ -352,80 +355,3 @@ def inference_context(model):
     model.eval()
     yield
     model.train(training_mode)
-
-def load_images(path:str ='/globalwork/roy/dynamite_video/mivos/MiVOS/datasets/DAVIS/DAVIS-2017-trainval')-> dict:
-    val_set = os.path.join(path,'ImageSets/2017/val.txt')
-    with open(val_set, 'r') as f:
-        seqs = [line.rstrip('\n') for line in f.readlines()]
-    all_images = {}
-    image_path = os.path.join(path,'JPEGImages/480p')
-    transform = transforms.Compose([transforms.ToTensor()])
-    for s in seqs:
-        seq_images = []
-        seq_path = os.path.join(image_path, s)
-        for file in os.listdir(seq_path):
-            if file.endswith('.jpg'):
-                im = Image.open(os.path.join(seq_path, file))
-                im = transform(im)
-                seq_images.append(im)
-        seq_images = torch.stack(seq_images)
-        all_images[s] = seq_images
-    return all_images
-
-def load_gt_masks(path:str='/globalwork/roy/dynamite_video/mivos/MiVOS/datasets/DAVIS/DAVIS-2017-trainval')-> dict:
-    val_set = os.path.join(path,'ImageSets/2017/val.txt')
-    with open(val_set, 'r') as f:
-        seqs = [line.rstrip('\n') for line in f.readlines()]
-    all_gt_masks = {}
-    mask_path = os.path.join(path,'Annotations/480p')
-    for s in seqs:
-        seq_images = []
-        seq_path = os.path.join(mask_path, s)
-        for file in os.listdir(seq_path):
-            if file.endswith('.png'):
-                im = np.asarray(Image.open(os.path.join(seq_path, file)))
-                seq_images.append(im)
-        seq_images = np.asarray(seq_images)
-        all_gt_masks[s] = seq_images
-    return all_gt_masks
-
-def compute_iou_for_sequence(pred: np.ndarray, gt: np.ndarray) -> list:
-    ious = []
-    for gt_mask, pred_mask in zip(gt, pred):
-        intersection = np.logical_and(gt_mask, pred_mask).sum()
-        union = np.logical_or(gt_mask, pred_mask).sum()
-        ious.append(intersection/union)
-    return ious
-
-def compute_instance_wise_iou_for_sequence(pred: np.ndarray, gt: np.ndarray)->np.ndarray:
-    # pred - output masks after temporal propagation
-    # gt - ground truth masks
-    ious = []
-    num_instances = len(np.unique(gt[0])) - 1
-    idx = 0
-    for gt_frame, pred_frame in zip(gt, pred):    # frame-level
-        
-        ious_frame = []
-        mask_H,mask_W = gt_frame.shape
-        
-        gt_inst = np.zeros((num_instances,mask_H,mask_W))
-        for i in range(num_instances):
-            gt_inst[num_instances-i-1][np.where(gt_frame==i+1)] = 1
-        
-        pred_inst = np.zeros((num_instances,mask_H,mask_W))
-        for i in range(num_instances):
-            pred_inst[i][np.where(pred_frame==i+1)] = 1
-        
-        for g,p in zip(gt_inst, pred_inst):     # instance-level
-            intersection = np.logical_and(g, p).sum()
-            union = np.logical_or(g, p).sum()
-            ious_frame.append(intersection/union)
-        ious.append(ious_frame)
-        idx+=1
-    return np.array(ious)
-
-def unsqueeze_mask(mask, channels):
-    dummy = np.zeros((channels, mask.shape[0], mask.shape[1]))
-    for i in range(1,channels+1):                        
-        dummy[i-1][np.where(mask==i)] = 1
-    return dummy

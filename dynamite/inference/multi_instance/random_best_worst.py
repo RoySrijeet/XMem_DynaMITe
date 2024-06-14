@@ -130,7 +130,7 @@ def evaluate(
 
                 # (re)load Clicker and Predictor (DynaMITe)
                 if num_interactions_for_sequence[lowest_frame_index] == 0:                           # if frame has been previously interacted with 
-                    clicker = Clicker(inputs, sampling_strategy)
+                    clicker = Clicker(inputs, sampling_strategy, dataset_name)
                     predictor = Predictor(model)
                     repeat = False
                 else:                                                  
@@ -314,7 +314,7 @@ def evaluate(
                 all_ious[seq] = iou_for_sequence 
                 del iou_for_sequence, jaccard_instances, jaccard_mean, contour_instances, contour_mean
             
-            del clicker_dict, predictor_dict, processor
+            del clicker_dict, predictor_dict
             del all_masks, num_interactions_for_sequence            
             gc.collect()
 

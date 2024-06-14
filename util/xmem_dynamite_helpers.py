@@ -24,8 +24,8 @@ _DATASET_PATH = {
     },
     "burst_val":{
         "annotations": "BURST_masks/val",
-        # "images":"BURST/all_frames/val",
         "images":"BURST/annotated_frames/val",
+        #"images":"BURST/all_frames/val",
         "sets":"",
     }
 }
@@ -70,7 +70,6 @@ def load_gt_masks(dataset_name="davis_2017_val", debug_mode=False):
         with open(val_set, 'r') as f:
             seqs = [line.rstrip('\n') for line in f.readlines()]
     all_gt_masks = {}
-    print(f'[LOADER] Found {len(seqs)} sequences!')
     for s in seqs:
         seq_images = []
         seq_path = os.path.join(mask_path, s)
@@ -141,7 +140,6 @@ from dynamite.data.dataset_mappers.evaluation_dataset_mapper import original_res
 def burst_video_loader(sequence):
     dataset_name = "burst_val"
     detectron2_dictionary = DatasetCatalog.get(dataset_name)    
-    print(len(detectron2_dictionary))
     
     dataloader_dict = defaultdict(list)    
     for idx, dataset_dict in enumerate(detectron2_dictionary):

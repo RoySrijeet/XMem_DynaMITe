@@ -27,13 +27,14 @@ def eval_xmem(config, seq, gt_masks=None, dynamite_preds=None):
     """
     Data preparation
     """
-    meta_dataset = LongTestDataset(path.join(config['generic_path']), size=config['size'])
+    meta_dataset = LongTestDataset(size=config['size'], dataset_name=config["dataset_name"],data_root=path.join(config['generic_path']))
     output = config['output']
     torch.autograd.set_grad_enabled(False)
     palette = Image.open('/globalwork/roy/dynamite_video/mivos_dynamite/MiVOS_DynaMITe/datasets/DAVIS/DAVIS-2017-trainval/Annotations/480p/blackswan/00000.png').getpalette()
 
     # Set up loader
-    meta_loader = meta_dataset.get_datasets()
+    #meta_loader = meta_dataset.get_datasets()
+    meta_loader = meta_dataset.get_datasets(seq_list=[seq])
 
     # Load our checkpoint
     network = XMem(config, config['model']).cuda().eval()

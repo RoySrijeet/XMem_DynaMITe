@@ -170,7 +170,6 @@ def main(args):
 
     dataset_name = args.eval_datasets[0]
     # load data
-    print(f'[INFO] Loading all ground truth masks from the disc...')
     all_gt_masks = helpers.load_gt_masks(dataset_name, args.debug)
     all_images = {}
     if dataset_name not in ["mose_val", "burst_val"]:        
@@ -209,6 +208,7 @@ def main(args):
             # XMem args -
             xmem_config={}
             xmem_config['model'] = './saves/XMem.pth'           # pre-trained XMem weights
+            xmem_config["dataset_name"] = dataset_name
             xmem_config['generic_path'] = None                  # for generic eval - a folder that contains "JPEGImages" and "Annotations"
             xmem_config['output'] = None               
             xmem_config['save_all'] = True                     # save all frames - useful only in YouTubeVOS/long-time video
@@ -238,7 +238,7 @@ def main(args):
 
             #return res
             print(f'Finished experiment: {interactions} interactions, at IoU threshold {iou}')
-            del dynamite_model, res, dataloader_dict_copy
+            del dynamite_model, res, data
             torch.cuda.empty_cache()
             gc.collect()
 

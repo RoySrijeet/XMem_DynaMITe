@@ -86,18 +86,18 @@ def evaluate(
                 dataloader_dict = helpers.burst_video_loader(seq)
             
             if dataset_name not in ["mose_val", "burst_val"]:
-                all_frames = all_images[seq]                            # collect all image frames in the sequence
-                all_masks = all_gt_masks[seq]
+                #all_frames = all_images[seq]                            # collect all image frames in the sequence
+                all_masks = all_gt_masks[seq]                
             else:
-                all_frames = helpers.load_sequence_images(seq, dataset_name)
+                #all_frames = helpers.load_sequence_images(seq, dataset_name)
                 all_masks = helpers.load_sequence_masks(seq, dataset_name)
+            num_frames = len(all_masks)
             
             # Initialize propagation module - once per-sequence
             seq_object_ids = set(np.unique(all_gt_masks[seq][0]))       # object ids in the sequence
             seq_num_instances = len(seq_object_ids) - 1                 # remove bg
-            all_frames = all_images[seq]                                # collect all image frames in the sequence
-            num_frames = len(all_frames)                                # sequence length
-            all_frames = all_frames.unsqueeze(0).float()                            
+            #num_frames = len(all_frames)                                # sequence length
+            #all_frames = all_frames.unsqueeze(0).float()                            
 
             # counters and trackers
             lowest_frame_index = 0                                                   # frame with lowest IoU after propagation - initially, first frame
@@ -192,12 +192,10 @@ def evaluate(
                     
                     while all(iou >= iou_checkpoints[0] for iou in ious):                                    # IoU checkpoints
                         t = iou_checkpoints.pop(0)
-                        print(f'[DynaMITe INFO][SEQ:{seq}][ROUND:{round_num}] Frame {lowest_frame_index} 
-                            reached IoU Checkpoint {t} after {num_interactions_for_sequence[lowest_frame_index]} interactions.')
+                        print(f'[DynaMITe INFO][SEQ:{seq}][ROUND:{round_num}] Frame {lowest_frame_index} reached IoU Checkpoint {t} after {num_interactions_for_sequence[lowest_frame_index]} interactions.')
                     
                     if all(iou >= iou_threshold for iou in ious):                                             # 2nd stopping criterion - if IoU threshold is reached
-                        print(f'[DynaMITe INFO][SEQ:{seq}][ROUND:{round_num}] Frame {lowest_frame_index} 
-                            meets IoU Threshold {iou_threshold} after {num_interactions_for_sequence[lowest_frame_index]} interactions!')
+                        print(f'[DynaMITe INFO][SEQ:{seq}][ROUND:{round_num}] Frame {lowest_frame_index} meets IoU Threshold {iou_threshold} after {num_interactions_for_sequence[lowest_frame_index]} interactions!')
                         break
 
                     loop += 1             
@@ -308,15 +306,16 @@ def evaluate(
             all_instance_level_iou[seq] = instance_level_iou
             all_rounds[seq] = round_num
 
-            # store metrics for entire sequence
-            all_j_and_f[seq] = j_and_f                                                            
-            all_jaccard[seq] = jaccard_mean.tolist()
-            all_contour[seq] = contour_mean.tolist()
-            all_ious[seq] = iou_for_sequence 
+            if dataset_name not in ['mose_val', 'burst_val']: 
+                # store metrics for entire sequence
+                all_j_and_f[seq] = j_and_f                                                       
+                all_jaccard[seq] = jaccard_mean.tolist()
+                all_contour[seq] = contour_mean.tolist()
+                all_ious[seq] = iou_for_sequence 
+                del iou_for_sequence, jaccard_instances, jaccard_mean, contour_instances, contour_mean
             
-            del clicker_dict, predictor_dict
-            del all_frames, num_interactions_for_sequence   
-            del iou_for_sequence, jaccard_instances, jaccard_mean, contour_instances, contour_mean
+            del clicker_dict, predictor_dict, processor
+            del all_masks, num_interactions_for_sequence            
             gc.collect()
 
     results = {

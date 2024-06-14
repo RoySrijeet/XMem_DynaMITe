@@ -3,29 +3,32 @@ from os import path
 import json
 
 from inference.data.video_reader import VideoReader
-
+import util.xmem_dynamite_helpers as helpers
+_DATASET_ROOT = helpers._DATASET_ROOT
+_DATASET_PATH = helpers._DATASET_PATH
 
 class LongTestDataset:
-    def __init__(self, data_root, size=-1, dataset_name='davis_2017_val'):
-        #self.image_dir = path.join(data_root, 'JPEGImages')
-        self.image_dir = '/globalwork/roy/dynamite_video/xmem_dynamite/XMem_DynaMITe/datasets/DAVIS/DAVIS-2017-trainval/JPEGImages/480p'
-        if dataset_name == 'mose_val':
-            self.image_dir = '/globalwork/roy/dynamite_video/xmem_dynamite/XMem_DynaMITe/datasets/MOSE/valid/JPEGImages'
+    def __init__(self, size=-1, dataset_name='davis_2017_val', data_root=None):
+        self.image_dir = os.path.join(_DATASET_ROOT, _DATASET_PATH[dataset_name]["images"])
         print(f'[LONG TEST DATASET] Image Directory: {self.image_dir}')
-        self.mask_dir = data_root
+        self.mask_dir = os.path.join(_DATASET_ROOT, _DATASET_PATH[dataset_name]["annotations"])
         print(f'[LONG TEST DATASET] Mask Directory: {self.mask_dir}')
         self.size = size
 
         self.vid_list = sorted(os.listdir(self.mask_dir))
 
-    def get_datasets(self):
-        for video in self.vid_list:        
+    def get_datasets(self, seq_list=None):
+        if seq_list:
+            vid_list = seq_list
+        else:
+            vid_list = self.vid_list
+        for video in vid_list:
             yield VideoReader(video, 
                 path.join(self.image_dir, video), 
                 path.join(self.mask_dir, video),
-                to_save = [
-                    name[:-4] for name in os.listdir(path.join(self.mask_dir, video))
-                ],
+                # to_save = [
+                #     name[:-4] for name in os.listdir(path.join(self.mask_dir, video))
+                # ],
                 size=self.size,
                 use_all_mask=True
             )

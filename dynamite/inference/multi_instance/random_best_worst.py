@@ -18,6 +18,9 @@ from metrics.j_and_f_scores import batched_jaccard,batched_f_measure
 from eval import eval_xmem
 import gc
 
+import util.xmem_dynamite_helpers as helpers
+_DATASET_ROOT = helpers._DATASET_ROOT
+_DATASET_PATH = helpers._DATASET_PATH
 
 def evaluate(
     model, xmem_config,
@@ -62,10 +65,15 @@ def evaluate(
         total_num_rounds = 0                                             # for whole dataset
 
         random.seed(123456+seed_id)
+
+        if dataset_name=="burst_val":
+            sequence_list = dataloader_dict
+        else:
+            sequence_list = list(dataloader_dict.keys())
     
         #### SEQUENCE-LEVEL LOOP ####
         print(f'[EVALUATOR INFO] Sequence-wise evaluation...')
-        for seq in list(dataloader_dict.keys()):
+        for seq in sequence_list:
             print(f'\n[SEQUENCE INFO] Sequence: {seq}')
             if vis_path:
                 vis_path_seq = os.path.join(vis_path, seq)
@@ -73,6 +81,16 @@ def evaluate(
             os.makedirs(os.path.join(expt_path,'Annotations'), exist_ok=True)          
             xmem_config['output'] = os.path.join(expt_path,'Annotations',seq)
             os.makedirs(os.path.join(expt_path,'Annotations',seq), exist_ok=True)
+            
+            if dataset_name=="burst_val":
+                dataloader_dict = helpers.burst_video_loader(seq)
+            
+            if dataset_name not in ["mose_val", "burst_val"]:
+                all_frames = all_images[seq]                            # collect all image frames in the sequence
+                all_masks = all_gt_masks[seq]
+            else:
+                all_frames = helpers.load_sequence_images(seq, dataset_name)
+                all_masks = helpers.load_sequence_masks(seq, dataset_name)
             
             # Initialize propagation module - once per-sequence
             seq_object_ids = set(np.unique(all_gt_masks[seq][0]))       # object ids in the sequence
@@ -163,7 +181,7 @@ def evaluate(
                    clicker.save_visualization(vis_path_round, ious=ious, num_interactions=num_interactions_for_sequence[lowest_frame_index], round_num=round_num, save_masks=save_masks)             
                 
                 # interaction limit
-                max_iters_for_image = max_interactions * num_instances
+                max_iters_for_image = max_interactions * num_instances +1
                 point_sampled = True
                 random_indexes = list(range(len(ious)))
 
@@ -224,8 +242,13 @@ def evaluate(
                 # XMEM
                 out_masks = eval_xmem(xmem_config, seq, all_gt_masks[seq], dynamite_preds)            
 
-                if dataset_name in ['mose_val']:
-                    ...
+                if dataset_name in ['mose_val', 'burst_val']:                    
+                    if save_masks:
+                        print(f'[PROPAGATION INFO][SEQ:{seq}][ROUND:{round_num}] Saving masks...')
+                        os.makedirs(os.path.join(vis_path, "mivos_propagation", seq.split('/')[0],seq.split('/')[1]), exist_ok=True)
+                        np.save(os.path.join(vis_path, "mivos_propagation", seq.split('/')[0],seq.split('/')[1],f"propagation_output_seq_{seq.split('/')[0]}_{seq.split('/')[1]}.npy"), out_masks)                    
+                    lowest_frame_index = -1 #stop round iter
+                    break
                 else:
                     # metrics (mean: over instances in a frame)
                     jaccard_mean, jaccard_instances = batched_jaccard(all_gt_masks[seq], out_masks, average_over_objects=True, nb_objects=seq_num_instances)

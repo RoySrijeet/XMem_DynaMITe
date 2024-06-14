@@ -32,6 +32,7 @@ from detectron2.engine import (
     launch,
 )
 from dynamite.utils.misc import default_argument_parser
+from dynamite.inference.multi_instance.random_best_worst import evaluate
 
 # from detectron2.projects.deeplab import add_deeplab_config, build_lr_scheduler
 from detectron2.solver.build import maybe_add_gradient_clipping
@@ -49,23 +50,11 @@ from dynamite import (
 from dynamite.inference.utils.eval_utils import log_single_instance, log_multi_instance
 
 from metrics.summary import summarize_results,summarize_round_results
+import util.xmem_dynamite_helpers as helpers
 import copy
 import gc
-
-_root = "/globalwork/roy/dynamite_video/xmem_dynamite/XMem_DynaMITe/datasets/"
-_DATASET_PATH = {
-    "davis_2017_val": {
-        "annotations": "DAVIS/DAVIS-2017-trainval/Annotations/480p",
-        "images": "DAVIS/DAVIS-2017-trainval/JPEGImages/480p",
-        "sets": "DAVIS/DAVIS-2017-trainval/ImageSets/2017/val.txt",
-    },
-    "mose_val": {
-        "annotations": "MOSE/valid/Annotations",
-        "images":"MOSE/valid/JPEGImages",
-        "sets":"",
-    },
-    "kitti_mots_val": {},
-}
+_DATASET_ROOT = helpers._DATASET_ROOT
+_DATASET_PATH = helpers._DATASET_PATH
 
 class Trainer(DefaultTrainer):
     """
@@ -109,25 +98,12 @@ class Trainer(DefaultTrainer):
 
         for dataset_name in eval_datasets:
 
-            if dataset_name in ["davis_2017_val","mose_val","sbd_multi_insts","coco_2017_val"]:
-                print(f'[INFO] Initiating Multi-Instance Evaluation on {eval_datasets}...')
-                
-                if eval_strategy in ["random", "best", "worst"]:
-                    if dataset_name != "mose_val":
-                        from dynamite.inference.multi_instance.random_best_worst import evaluate
-                    else:
-                        from dynamite.inference.multi_instance.random_best_worst_mose import evaluate
-                elif eval_strategy == "max_dt":
-                    from dynamite.inference.multi_instance.max_dt import evaluate
-                elif eval_strategy == "wlb":
-                    from dynamite.inference.multi_instance.wlb import evaluate
-                elif eval_strategy == "round_robin":
-                    from dynamite.inference.multi_instance.round_robin import evaluate
-                
-                print(f'[INFO] Loaded Evaluation routine following {eval_strategy} evaluation strategy!')                                
-
+            if dataset_name in ["davis_2017_val","mose_val","sbd_multi_insts","burst_val","coco_2017_val"]:
+                print(f'[INFO] Initiating Multi-Instance Evaluation on {eval_datasets}...')                
+                print(f'[INFO] Loaded Evaluation routine following {eval_strategy} evaluation strategy!')
                 print(f'Interactions: {interactions}')
                 print(f'IoU threshold: {iou}')
+                
                 save_path = os.path.join(vis_path, f'{interactions}_interactions/iou_{int(iou*100)}')
                 #save_path = vis_path
                 os.makedirs(save_path, exist_ok=True) 
@@ -167,54 +143,6 @@ class Trainer(DefaultTrainer):
                     summary_df.to_csv(os.path.join(save_path, f'round_summary_{interactions}_interactions_iou_{int(iou*100)}.csv'))
                 del results_i
 
-                
-def load_images(dataset_name="davis_2017_val", debug_mode=False):
-    image_path = os.path.join(_root,_DATASET_PATH[dataset_name]["images"])
-    if dataset_name=="mose_val":
-        seqs = sorted([f for f in os.listdir(image_path) if os.path.isdir(os.path.join(image_path,f))])
-    else:
-        val_set = os.path.join(_root,_DATASET_PATH[dataset_name]["sets"])
-        with open(val_set, 'r') as f:
-            seqs = [line.rstrip('\n') for line in f.readlines()]
-    all_images = {}    
-    transform = transforms.Compose([transforms.ToTensor()])
-    for s in seqs:
-        seq_images = []
-        seq_path = os.path.join(image_path, s)
-        imagefiles = sorted([f for f in os.listdir(seq_path)])
-        for file in imagefiles:
-            if file.endswith('.jpg') or file.endswith('.png'):
-                im = Image.open(os.path.join(seq_path, file))
-                im = transform(im)
-                seq_images.append(im)
-        seq_images = torch.stack(seq_images)
-        all_images[s] = seq_images
-        if debug_mode:
-            break
-    return all_images
-
-def load_gt_masks(dataset_name="davis_2017_val", debug_mode=False):
-    mask_path = os.path.join(_root,_DATASET_PATH[dataset_name]["annotations"])
-    if dataset_name=="mose_val":
-        seqs = sorted([f for f in os.listdir(mask_path) if os.path.isdir(os.path.join(mask_path,f))])
-    else:
-        val_set = os.path.join(_root,_DATASET_PATH[dataset_name]["sets"])
-        with open(val_set, 'r') as f:
-            seqs = [line.rstrip('\n') for line in f.readlines()]
-    all_gt_masks = {}
-    for s in seqs:
-        seq_images = []
-        seq_path = os.path.join(mask_path, s)
-        maskfiles = sorted([f for f in os.listdir(seq_path)])
-        for file in maskfiles:
-            if file.endswith('.jpg') or file.endswith('.png'):
-                im = np.asarray(Image.open(os.path.join(seq_path, file)))
-                seq_images.append(im)
-        seq_images = np.asarray(seq_images)
-        all_gt_masks[s] = seq_images
-        if debug_mode:
-            break
-    return all_gt_masks
 
 def setup(args):
     """
@@ -243,30 +171,28 @@ def main(args):
     dataset_name = args.eval_datasets[0]
     # load data
     print(f'[INFO] Loading all ground truth masks from the disc...')
-    all_gt_masks = load_gt_masks(dataset_name, args.debug)
-    if dataset_name != "mose_val":
-        print(f'[INFO] Loading all frames from the disc...')
-        all_images = load_images(dataset_name, args.debug)                
+    all_gt_masks = helpers.load_gt_masks(dataset_name, args.debug)
+    all_images = {}
+    if dataset_name not in ["mose_val", "burst_val"]:        
+        all_images = helpers.load_images(dataset_name, args.debug)
         assert len(all_images) == len(all_gt_masks)
-        print(f'[INFO] Loaded {len(all_images)} sequences.')
-    else:
-        all_images = {}
     
-    print(f'[INFO] Loading test data loader from {dataset_name}...')
-    data_loader = Trainer.build_test_loader(cfg, dataset_name)
-    print(f'[INFO] Data loader  preparation complete! length: {len(data_loader)}')
-    dataloader_dict = defaultdict(list)
+
     print(f'[INFO] Iterating through the Data Loader...')
-    # iterate through the data_loader, one image at a time
-    for idx, inputs in enumerate(data_loader):                     
-        curr_seq_name = inputs[0]["file_name"].split('/')[-2]
-        if args.debug and curr_seq_name != list(all_images.keys())[0]:
-            break
-        dataloader_dict[curr_seq_name].append([idx, inputs])
-    del data_loader
+    if dataset_name in ["burst_val"]:
+        dataloader_dict = helpers.burst_imset()
+    else:
+        data_loader = Trainer.build_test_loader(cfg, dataset_name)
+        dataloader_dict = defaultdict(list)
+        for idx, inputs in enumerate(data_loader):      
+            curr_seq_name = inputs[0]["file_name"].split('/')[-2]
+            if args.debug and curr_seq_name != list(all_gt_masks.keys())[0]:
+                break
+            dataloader_dict[curr_seq_name].append([idx, inputs])
+        del data_loader
 
     for interactions, iou in list(itertools.product(args.max_interactions,args.iou_threshold)):
-        dataloader_dict_copy = copy.deepcopy(dataloader_dict)
+        data = copy.deepcopy(dataloader_dict)
     # for evaluation
         if args.eval_only:
             print('[INFO] DynaMITExXMem Evaluation!')
@@ -303,11 +229,11 @@ def main(args):
             xmem_config['enable_long_term'] = not xmem_config['disable_long_term']
 
             # bidirectional propagation
-            xmem_config['cutoff'] = True        # if True, bidirectional propagation cuts off at nearest DynaMITe-refined frames
+            xmem_config['cutoff'] = False        # if True, bidirectional propagation cuts off at nearest DynaMITe-refined frames
 
             res = Trainer.interactive_evaluation(cfg, dynamite_model, 
                                                 interactions, iou, 
-                                                all_images, all_gt_masks, dataloader_dict_copy,
+                                                all_images, all_gt_masks, data,
                                                 args, xmem_config)
 
             #return res
@@ -318,7 +244,6 @@ def main(args):
 
     else:
         print(f'[INFO] Training routine... Not Implemented')
-
 
 
 if __name__ == "__main__":

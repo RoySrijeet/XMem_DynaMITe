@@ -8,11 +8,10 @@ _DATASET_ROOT = helpers._DATASET_ROOT
 _DATASET_PATH = helpers._DATASET_PATH
 
 class LongTestDataset:
-    def __init__(self, size=-1, dataset_name='davis_2017_val', data_root=None):
+    def __init__(self, size=-1, dataset_name='davis_2017_val', mask_dir=None):
         self.image_dir = os.path.join(_DATASET_ROOT, _DATASET_PATH[dataset_name]["images"])
-        print(f'[LONG TEST DATASET] Image Directory: {self.image_dir}')
-        self.mask_dir = os.path.join(_DATASET_ROOT, _DATASET_PATH[dataset_name]["annotations"])
-        print(f'[LONG TEST DATASET] Mask Directory: {self.mask_dir}')
+        #self.mask_dir = os.path.join(_DATASET_ROOT, _DATASET_PATH[dataset_name]["annotations"])
+        self.mask_dir = mask_dir
         self.size = size
 
         self.vid_list = sorted(os.listdir(self.mask_dir))

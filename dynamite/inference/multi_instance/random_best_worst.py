@@ -84,18 +84,14 @@ def evaluate(
                 dataloader_dict = helpers.burst_video_loader(seq)
             
             if dataset_name not in ["mose_val", "burst_val"]:
-                #all_frames = all_images[seq]                            # collect all image frames in the sequence
                 all_masks = all_gt_masks[seq]                
             else:
-                #all_frames = helpers.load_sequence_images(seq, dataset_name)
                 all_masks = helpers.load_sequence_masks(seq, dataset_name)
             num_frames = len(all_masks)
             
             # Initialize propagation module - once per-sequence
-            seq_object_ids = set(np.unique(all_gt_masks[seq][0]))       # object ids in the sequence
+            seq_object_ids = set(np.unique(all_masks[0]))       # object ids in the sequence
             seq_num_instances = len(seq_object_ids) - 1                 # remove bg
-            #num_frames = len(all_frames)                                # sequence length
-            #all_frames = all_frames.unsqueeze(0).float()                            
 
             # counters and trackers
             lowest_frame_index = 0                                                   # frame with lowest IoU after propagation - initially, first frame
@@ -138,7 +134,7 @@ def evaluate(
                 
                 
                 #check for missing objects
-                object_ids = set(np.unique(all_gt_masks[seq][lowest_frame_index]))                  # objects present in the frame                
+                object_ids = set(np.unique(all_masks[lowest_frame_index]))                  # objects present in the frame                
                 num_instances = clicker.num_instances
                 missing_obj_ids = None
                 if num_instances!=seq_num_instances:                    
@@ -244,15 +240,15 @@ def evaluate(
                 predictor_dict[lowest_frame_index] = predictor                            
                 
                 # XMEM
-                out_masks = eval_xmem(xmem_config, seq, all_gt_masks[seq], dynamite_preds)            
+                out_masks = eval_xmem(xmem_config, seq, all_masks, dynamite_preds)            
 
-                if dataset_name in ['mose_val', 'burst_val']:
+                if dataset_name in ['mose_val']:
                     lowest_frame_index = -1 #stop round iter
                     break
                 else:
                     # metrics (mean: over instances in a frame)
-                    jaccard_mean, jaccard_instances = batched_jaccard(all_gt_masks[seq], out_masks, average_over_objects=True, nb_objects=seq_num_instances)
-                    contour_mean, contour_instances = batched_f_measure(all_gt_masks[seq], out_masks, average_over_objects=True, nb_objects=seq_num_instances)
+                    jaccard_mean, jaccard_instances = batched_jaccard(all_masks, out_masks, average_over_objects=True, nb_objects=seq_num_instances)
+                    contour_mean, contour_instances = batched_f_measure(all_masks, out_masks, average_over_objects=True, nb_objects=seq_num_instances)
 
                     j_and_f = 0.5*jaccard_mean + 0.5*contour_mean
                     j_and_f = j_and_f.tolist()

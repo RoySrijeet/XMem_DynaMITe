@@ -353,9 +353,9 @@ class Clicker:
         
             if expt_path:
                 if self.dataset_name == "burst_val":
-                    filename = os.path.join(expt_path,f"{str(self.inputs[0]['image_id'])[-5:]}.png")
+                    filename = os.path.join(expt_path,f"{str(self.inputs[0]['image_id'].split('-')[-1])}.png")
                 else:
-                    filename = os.path.join(expt_path,f"{str(self.inputs[0]['image_id'].split('-')[-1])}.png")                    
+                    filename = os.path.join(expt_path,f"{str(self.inputs[0]['image_id'])[-5:]}.png")
                 if os.path.isfile(filename):
                     print(f"[DynaMITe INFO] Replacing mask for frame {filename}")
                 img = Image.fromarray(dummy_.astype(np.uint8))

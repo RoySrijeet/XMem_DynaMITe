@@ -57,13 +57,11 @@ def evaluate(
 
     with ExitStack() as stack:                                           
 
-        if isinstance(model, nn.Module):    
-            stack.enter_context(inference_context(model))                           
-        stack.enter_context(torch.no_grad())                             
-                           
-        total_num_interactions = 0                                       # for whole dataset       
-        total_num_rounds = 0                                             # for whole dataset
-
+        if isinstance(model, nn.Module):
+            stack.enter_context(inference_context(model))
+        stack.enter_context(torch.no_grad())
+        total_num_interactions = 0
+        total_num_rounds = 0
         random.seed(123456+seed_id)
 
         if dataset_name=="burst_val":
@@ -130,7 +128,7 @@ def evaluate(
 
                 # (re)load Clicker and Predictor (DynaMITe)
                 if num_interactions_for_sequence[lowest_frame_index] == 0:                           # if frame has been previously interacted with 
-                    clicker = Clicker(inputs, sampling_strategy, dataset_name)
+                    clicker = Clicker(inputs, sampling_strategy, dataset_name=dataset_name)
                     predictor = Predictor(model)
                     repeat = False
                 else:                                                  

@@ -82,7 +82,6 @@ def eval_xmem(config, seq, gt_masks=None, dynamite_preds=None):
 
         #for ti, data in enumerate(loader):
         for ti in chain(range(curr, ceil), range(curr-1,floor,-1)):
-            print(f'Propagating... frame {ti}')
             with torch.cuda.amp.autocast(enabled=not config['benchmark']):
                 data = vid_reader[ti]
                 rgb = data['rgb'].cuda()#[0]

@@ -170,12 +170,12 @@ def main(args):
 
     dataset_name = args.eval_datasets[0]
     # load data
-    all_gt_masks = helpers.load_gt_masks(dataset_name, args.debug)
+    all_gt_masks = {}
     all_images = {}
     if dataset_name not in ["mose_val", "burst_val"]:        
         all_images = helpers.load_images(dataset_name, args.debug)
+        all_gt_masks = helpers.load_gt_masks(dataset_name, args.debug)
         assert len(all_images) == len(all_gt_masks)
-    
 
     print(f'[INFO] Iterating through the Data Loader...')
     if dataset_name in ["burst_val"]:
